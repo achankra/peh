@@ -1,0 +1,168 @@
+# OPA Gatekeeper Policy: Restrict Image Registries
+# Only allows container images from approved registries
+# Ensures supply chain security and enables compliance scanning
+
+---
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srestrictimageregistries
+  annotations:
+    description: "Restricts container images to approved registries"
+    examples: |
+      Allowed registries:
+      - gcr.io/my-project
+      - registry.example.com
+      - quay.io/my-org
+      
+      Compliant image:
+      image: gcr.io/my-project/myapp:v1.0.0
+      
+      Non-compliant image:
+      image: docker.io/library/nginx:latest
+
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRestrictImageRegistries
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            allowedRegistries:
+              type: array
+              items:
+                type: string
+              description: "List of allowed image registries (prefixes)"
+            allowUndeclaredRegistries:
+              type: boolean
+              description: "Allow images without explicit registry (Docker Hub)"
+
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srestrictimageregistries
+
+        # Deny images from unauthorized registries
+        deny[msg] {
+          image := input_images[_]
+          registry := get_registry(image)
+          not is_allowed_registry(registry)
+          msg := sprintf(
+            "Image '%v' is from unauthorized registry. Allowed: %v",
+            [image, input.parameters.allowedRegistries]
+          )
+        }
+
+        # Extract registry from image reference
+        get_registry(image) = registry {
+          # If image contains a slash and before first slash looks like domain
+          # e.g., gcr.io/project/image or registry.io:5000/image
+          parts := split(image, "/")
+          count(parts) > 1
+          first := parts[0]
+          # Check if it contains . or : (characteristics of registry domain)
+          contains(first, ".") | contains(first, ":")
+          registry := first
+        } else = "docker.io" {
+          # If no registry specified, assume Docker Hub
+          true
+        }
+
+        # Check if registry is in allowed list
+        is_allowed_registry(registry) {
+          allowed := input.parameters.allowedRegistries[_]
+          startswith(registry, allowed)
+        }
+
+        # Get all images from containers
+        input_images[img] {
+          img := input.review.object.spec.containers[_].image
+        }
+
+        # Get images from init containers
+        input_images[img] {
+          img := input.review.object.spec.initContainers[_].image
+        }
+
+        # Get images from ephemeral containers
+        input_images[img] {
+          img := input.review.object.spec.ephemeralContainers[_].image
+        }
+
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRestrictImageRegistries
+metadata:
+  name: restrict-image-registries
+spec:
+  match:
+    excludedNamespaces:
+      - gatekeeper-system
+      - kube-system
+      - kube-public
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "DaemonSet", "StatefulSet", "ReplicaSet"]
+      - apiGroups: ["batch"]
+        kinds: ["Job", "CronJob"]
+
+  parameters:
+    # Approved registries (add your corporate registries here)
+    allowedRegistries:
+      - gcr.io/
+      - registry.example.com/
+      - quay.io/my-org/
+      - docker.io/library/  # Official Docker Hub images only
+      - k8s.gcr.io/
+
+    # Allow Docker Hub implicit registry (docker.io)
+    allowUndeclaredRegistries: false
+
+  # Start in audit mode
+  auditOnly: true
+
+---
+# Example: Non-compliant (unauthorized registry)
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: bad-deployment
+# spec:
+#   template:
+#     spec:
+#       containers:
+#       - name: app
+#         image: docker.io/random-user/untrusted-image:latest
+#         # This registry is not in allowedRegistries - VIOLATION
+
+---
+# Example: Compliant (authorized registry)
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: good-deployment
+# spec:
+#   template:
+#     spec:
+#       containers:
+#       - name: app
+#         image: gcr.io/my-project/myapp:v1.0.0
+#         # gcr.io/ is in allowedRegistries - ALLOWED
+
+---
+# Notes:
+# 1. Update allowedRegistries with your organization's registries
+# 2. Consider mirroring public images to your private registry
+# 3. Use image digest (SHA256) instead of tags for immutability:
+#    image: gcr.io/my-project/myapp@sha256:abc123...
+# 4. Configure ImagePullSecrets for private registries
+# 5. Implement image scanning in your registry (Trivy, Clair, etc.)
+# 6. Common registries:
+#    - GCR: gcr.io/PROJECT_ID/
+#    - ECR: ACCOUNT.dkr.ecr.REGION.amazonaws.com/
+#    - Azure: REGISTRY.azurecr.io/
+#    - Docker Hub: docker.io/ or just image:tag

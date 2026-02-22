@@ -1,0 +1,267 @@
+# Chapter 12: Vertical Pod Autoscaler Configuration
+# Demonstrates VPA for right-sizing pod CPU and memory requests
+# VPA analyzes actual resource usage and recommends optimal requests/limits
+
+---
+# VPA Example 1: Recommend mode (non-intrusive, provides recommendations only)
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: demo-webapp-vpa
+  namespace: cost-optimization-demo
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: demo-webapp
+  updatePolicy:
+    updateMode: "Off"  # Only recommendations, no automatic updates
+  resourcePolicy:
+    containerPolicies:
+    - containerName: "*"  # Apply to all containers
+      minAllowed:
+        cpu: 50m
+        memory: 64Mi
+      maxAllowed:
+        cpu: 1000m
+        memory: 1Gi
+      # Control adjustment boundaries for recommendations
+      controlledValues: RequestsAndLimits
+      controlledResources: ["cpu", "memory"]
+
+---
+# VPA Example 2: Recommend mode with specific thresholds
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: demo-stateful-vpa
+  namespace: cost-optimization-demo
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: demo-stateful
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: "app"
+      minAllowed:
+        cpu: 100m
+        memory: 128Mi
+      maxAllowed:
+        cpu: 2000m
+        memory: 2Gi
+      # VPA can scale limits up to 2x the recommended request
+      controlledValues: RequestsAndLimits
+      controlledResources: ["cpu", "memory"]
+
+---
+# VPA Example 3: Auto mode (automatically updates pods with new recommendations)
+# WARNING: Auto mode will cause pod restarts when resources change
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: demo-webapp-vpa-auto
+  namespace: cost-optimization-demo
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: demo-webapp
+  updatePolicy:
+    # Auto mode updates pods with new resource requests
+    # Pod will be evicted and recreated with new resources
+    updateMode: "Auto"
+    maxUnavailable: 1  # Allow 1 unavailable pod during update
+  resourcePolicy:
+    containerPolicies:
+    - containerName: "*"
+      minAllowed:
+        cpu: 50m
+        memory: 64Mi
+      maxAllowed:
+        cpu: 1000m
+        memory: 1Gi
+      controlledValues: RequestsAndLimits
+      controlledResources: ["cpu", "memory"]
+
+---
+# ClusterRole for VPA (required for VPA to work)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vpa-status-reader
+rules:
+- apiGroups:
+  - "autoscaling.k8s.io"
+  resources:
+  - verticalpodautoscalers
+  verbs:
+  - get
+  - list
+  - watch
+
+---
+# ClusterRoleBinding for VPA
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vpa-status-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vpa-status-reader
+subjects:
+- kind: ServiceAccount
+  name: vpa
+  namespace: kube-system
+
+---
+# ServiceAccount for VPA
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vpa
+  namespace: kube-system
+
+---
+# Sample VPA configuration for monitoring an app with variable load
+# This demonstrates the "Recreate" updateMode which is safer for production
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: variable-load-vpa
+  namespace: cost-optimization-demo
+spec:
+  targetRef:
+    apiVersion: "apps/v1"
+    kind: Deployment
+    name: demo-webapp
+  updatePolicy:
+    # Recreate mode: terminates and recreates pods (safer than in-place update)
+    updateMode: "Recreate"
+    minReplicas: 2  # Ensure minimum replicas for safety
+  resourcePolicy:
+    containerPolicies:
+    - containerName: "webapp"
+      minAllowed:
+        cpu: 50m
+        memory: 64Mi
+      maxAllowed:
+        cpu: 2000m
+        memory: 2Gi
+      # Only adjust requests, keep limits fixed
+      controlledValues: "RequestsOnly"
+      controlledResources: ["cpu", "memory"]
+  recommenders:
+  - name: "default"
+
+---
+# VPA configuration for memory-intensive workload
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: memory-intensive-vpa
+  namespace: cost-optimization-demo
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: demo-webapp
+  updatePolicy:
+    updateMode: "Off"  # Manual approval mode
+  resourcePolicy:
+    containerPolicies:
+    - containerName: "*"
+      minAllowed:
+        cpu: 100m
+        memory: 512Mi    # Higher memory minimum for this workload
+      maxAllowed:
+        cpu: 4000m
+        memory: 8Gi      # Higher memory maximum
+      controlledValues: RequestsAndLimits
+      controlledResources: ["cpu", "memory"]
+
+---
+# ConfigMap: VPA recommendations query example
+# This can be used with kubectl to query VPA recommendations
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vpa-query-examples
+  namespace: cost-optimization-demo
+data:
+  get-vpa-recommendations: |
+    #!/bin/bash
+    # Get all VPA recommendations in namespace
+    kubectl get vpa -n cost-optimization-demo -o wide
+    
+    # Describe specific VPA to see detailed recommendations
+    kubectl describe vpa demo-webapp-vpa -n cost-optimization-demo
+    
+    # Get VPA recommendations in JSON format
+    kubectl get vpa demo-webapp-vpa -n cost-optimization-demo -o json
+    
+    # Watch for VPA changes
+    kubectl get vpa -n cost-optimization-demo -w
+    
+  vpa-update-deployment-example: |
+    # After reviewing VPA recommendations, update deployment manually:
+    # 1. Review the recommendation:
+    #    kubectl describe vpa demo-webapp-vpa -n cost-optimization-demo
+    # 
+    # 2. Update your deployment spec with recommended values:
+    #    spec:
+    #      containers:
+    #      - name: webapp
+    #        resources:
+    #          requests:
+    #            cpu: <recommended-cpu>
+    #            memory: <recommended-memory>
+    #          limits:
+    #            cpu: <recommended-cpu * 2>
+    #            memory: <recommended-memory * 2>
+    # 
+    # 3. Apply updated manifest:
+    #    kubectl apply -f updated-deployment.yaml
+    
+  vpa-status-meanings: |
+    # VPA Recommendation Status:
+    # 
+    # UNSET      - No recommendation yet (pod running < 8 hours usually)
+    # LOWER      - Current request is too high, can be decreased
+    # TARGET     - This is the recommended request value
+    # UNCAPPED   - No upper limit recommendation available
+    # OFF        - VPA in "Off" mode, not monitoring
+    
+    # Container status values:
+    # lastUpdateTime - When the last recommendation was updated
+    # containerName  - The container this recommendation applies to
+
+---
+# Example: Namespace-wide VPA policies
+# This defines default policies for all VPAs in namespace
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vpa-policies
+  namespace: cost-optimization-demo
+data:
+  minimum-resources: |
+    # Minimum resources for all pods (safety guardrail)
+    cpu: "50m"
+    memory: "64Mi"
+  
+  maximum-resources: |
+    # Maximum resources to recommend (cost control)
+    cpu: "4000m"
+    memory: "8Gi"
+  
+  update-strategy: |
+    # Recommended strategy:
+    # - Use "Off" mode to get recommendations without automatic updates
+    # - Review recommendations monthly or quarterly
+    # - Manually update deployment with approved values
+    # - Use "Recreate" mode only for stateless apps
+    # - Avoid "Auto" mode in production without careful testing

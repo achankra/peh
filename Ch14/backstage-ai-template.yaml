@@ -1,0 +1,284 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: kubernetes-service-ai-template
+  title: Create Kubernetes Service with AI-Generated Config
+  description: Generate boilerplate Kubernetes service configurations using AI
+  tags:
+    - kubernetes
+    - microservice
+    - ai-generated
+    - scaffolder
+spec:
+  owner: platform-team
+  type: service
+  
+  parameters:
+    - title: Service Information
+      required:
+        - serviceName
+        - ownerName
+        - ownerEmail
+      properties:
+        serviceName:
+          title: Service Name
+          type: string
+          description: Name of the microservice (e.g., payment-service, auth-gateway)
+          pattern: "^[a-z][a-z0-9-]*[a-z0-9]$"
+          minLength: 3
+          maxLength: 30
+        
+        ownerName:
+          title: Owner Name
+          type: string
+          description: Team or person responsible for the service
+        
+        ownerEmail:
+          title: Owner Email
+          type: string
+          format: email
+          description: Contact email for the service owner
+    
+    - title: Technology Stack
+      required:
+        - language
+      properties:
+        language:
+          title: Programming Language
+          type: string
+          enum:
+            - python
+            - go
+            - java
+            - nodejs
+            - rust
+          default: go
+          description: Primary language for the service
+        
+        framework:
+          title: Framework
+          type: string
+          enum:
+            - fastapi
+            - flask
+            - gin
+            - fiber
+            - spring-boot
+            - express
+            - actix
+          description: Web framework to use
+    
+    - title: Infrastructure
+      required:
+        - database
+        - cacheLayer
+      properties:
+        database:
+          title: Database
+          type: string
+          enum:
+            - postgresql
+            - mysql
+            - mongodb
+            - dynamodb
+            - none
+          default: postgresql
+          description: Primary database for the service
+        
+        cacheLayer:
+          title: Cache Layer
+          type: string
+          enum:
+            - redis
+            - memcached
+            - none
+          default: redis
+          description: In-memory cache solution
+        
+        messageQueue:
+          title: Message Queue
+          type: string
+          enum:
+            - kafka
+            - rabbitmq
+            - aws-sqs
+            - none
+          default: none
+    
+    - title: Deployment Configuration
+      properties:
+        replicas:
+          title: Initial Replicas
+          type: integer
+          default: 3
+          minimum: 1
+          maximum: 10
+        
+        environment:
+          title: Environment
+          type: string
+          enum:
+            - development
+            - staging
+            - production
+          default: staging
+        
+        enableMonitoring:
+          title: Enable Prometheus Monitoring
+          type: boolean
+          default: true
+        
+        enableTracing:
+          title: Enable Distributed Tracing
+          type: boolean
+          default: true
+  
+  steps:
+    # Step 1: Generate deployment YAML using AI
+    - id: generate-deployment
+      name: Generate Kubernetes Deployment
+      action: roadiehq:utils:http:backend:call
+      input:
+        method: POST
+        path: /api/ai/generate/deployment
+        headers:
+          Content-Type: application/json
+        body:
+          serviceName: ${{ parameters.serviceName }}
+          language: ${{ parameters.language }}
+          framework: ${{ parameters.framework }}
+          replicas: ${{ parameters.replicas }}
+          database: ${{ parameters.database }}
+          cacheLayer: ${{ parameters.cacheLayer }}
+          monitoring: ${{ parameters.enableMonitoring }}
+          owner: ${{ parameters.ownerName }}
+    
+    # Step 2: Generate service configuration using AI
+    - id: generate-service-config
+      name: Generate Service Configuration
+      action: roadiehq:utils:http:backend:call
+      input:
+        method: POST
+        path: /api/ai/generate/service-config
+        headers:
+          Content-Type: application/json
+        body:
+          serviceName: ${{ parameters.serviceName }}
+          language: ${{ parameters.language }}
+          database: ${{ parameters.database }}
+          environment: ${{ parameters.environment }}
+    
+    # Step 3: Generate monitoring configuration using AI
+    - id: generate-monitoring-config
+      name: Generate Monitoring Config
+      if: ${{ parameters.enableMonitoring }}
+      action: roadiehq:utils:http:backend:call
+      input:
+        method: POST
+        path: /api/ai/generate/monitoring
+        headers:
+          Content-Type: application/json
+        body:
+          serviceName: ${{ parameters.serviceName }}
+          language: ${{ parameters.language }}
+          slos:
+            availability: 99.9
+            latency_p99_ms: 500
+    
+    # Step 4: Generate tracing configuration using AI
+    - id: generate-tracing-config
+      name: Generate Tracing Config
+      if: ${{ parameters.enableTracing }}
+      action: roadiehq:utils:http:backend:call
+      input:
+        method: POST
+        path: /api/ai/generate/tracing
+        headers:
+          Content-Type: application/json
+        body:
+          serviceName: ${{ parameters.serviceName }}
+          language: ${{ parameters.language }}
+          tracingBackend: jaeger
+    
+    # Step 5: Create Git repository
+    - id: publish
+      name: Publish Repository
+      action: publish:github
+      input:
+        allowedHosts:
+          - github.com
+        description: "Microservice: ${{ parameters.serviceName }}"
+        repoUrl: "github.com?repo=${{ parameters.serviceName }}&owner=my-org"
+        token: ${{ secrets.GITHUB_TOKEN }}
+        gitAuthorName: "AI Scaffolder"
+        gitAuthorEmail: "scaffolder@platform.local"
+    
+    # Step 6: Create Kubernetes namespace
+    - id: create-namespace
+      name: Create Kubernetes Namespace
+      action: roadiehq:utils:http:backend:call
+      input:
+        method: POST
+        path: /api/k8s/namespaces
+        headers:
+          Content-Type: application/json
+        body:
+          name: "${{ parameters.serviceName }}"
+          labels:
+            team: "${{ parameters.ownerName }}"
+            environment: "${{ parameters.environment }}"
+            ai-generated: "true"
+    
+    # Step 7: Deploy to Kubernetes
+    - id: deploy-kubernetes
+      name: Deploy to Kubernetes
+      action: roadiehq:utils:http:backend:call
+      input:
+        method: POST
+        path: /api/k8s/deploy
+        headers:
+          Content-Type: application/json
+        body:
+          namespace: "${{ parameters.serviceName }}"
+          deployment: ${{ steps['generate-deployment'].output.deployment }}
+          service: ${{ steps['generate-service-config'].output.service }}
+          monitoring: ${{ steps['generate-monitoring-config'].output.monitoring }}
+          tracing: ${{ steps['generate-tracing-config'].output.tracing }}
+    
+    # Step 8: Register in Backstage catalog
+    - id: register-catalog
+      name: Register in Backstage Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish'].output.repoContentsUrl }}
+        catalogInfoPath: /catalog-info.yaml
+  
+  # Output information for the user
+  output:
+    links:
+      - title: Repository
+        url: ${{ steps['publish'].output.remoteUrl }}
+      - title: Kubernetes Service
+        url: "https://k8s-dashboard.example.com/namespaces/${{ parameters.serviceName }}"
+      - title: Source Code
+        url: ${{ steps['publish'].output.repoContentsUrl }}
+    
+    text:
+      - title: Service Created Successfully
+        content: |
+          Your Kubernetes microservice **${{ parameters.serviceName }}** has been created!
+          
+          Next steps:
+          1. Clone the repository: `git clone ${{ steps['publish'].output.remoteUrl }}`
+          2. Review the generated Kubernetes manifests
+          3. Customize configurations as needed
+          4. Commit and push to trigger CI/CD pipeline
+          5. Monitor deployment in your dashboard
+          
+          AI-Generated Configurations:
+          - Deployment with ${{ parameters.replicas }} replicas
+          - Service configuration for ${{ parameters.framework }}
+          - Monitoring dashboards and alerts (Prometheus)
+          - Distributed tracing configuration (Jaeger)
+          
+          Owner: ${{ parameters.ownerName }} (${{ parameters.ownerEmail }})

@@ -1,0 +1,110 @@
+# Chapter 6: API Specification for Backstage Registration
+# ========================================================
+# OpenAPI 3.0 spec for the demo-app API, registered in Backstage
+# as a providesApis reference in catalog-info.yaml.
+openapi: 3.0.3
+info:
+  title: Demo App API
+  description: Platform demo application API for validating developer workflows.
+  version: 1.0.0
+  contact:
+    name: Platform Team
+    email: platform-team@company.com
+servers:
+  - url: https://demo-app.platform.company.com
+    description: Production
+  - url: https://demo-app.dev.company.com
+    description: Development
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      operationId: getHealth
+      tags: [System]
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+  /api/items:
+    get:
+      summary: List all items
+      operationId: listItems
+      tags: [Items]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Item'
+                  total:
+                    type: integer
+    post:
+      summary: Create a new item
+      operationId: createItem
+      tags: [Items]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateItemRequest'
+      responses:
+        '201':
+          description: Item created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Item'
+        '400':
+          description: Invalid request
+components:
+  schemas:
+    Item:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        version:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    CreateItemRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

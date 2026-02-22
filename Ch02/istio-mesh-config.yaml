@@ -1,0 +1,261 @@
+# Istio Service Mesh Configuration
+# Demonstrates mTLS, traffic policies, and authorization
+
+---
+# PeerAuthentication for strict mTLS enforcement
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: istio-system
+spec:
+  mtls:
+    mode: STRICT  # Enforce mTLS for all workloads in the mesh
+
+---
+# PeerAuthentication for specific namespace
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: platform-apps-mtls
+  namespace: platform-apps
+spec:
+  mtls:
+    mode: STRICT
+
+---
+# RequestAuthentication for JWT validation
+apiVersion: security.istio.io/v1beta1
+kind: RequestAuthentication
+metadata:
+  name: platform-jwt
+  namespace: platform-apps
+spec:
+  jwtRules:
+    - issuer: "https://your-auth-provider.com"  # Replace with your issuer
+      jwksUri: "https://your-auth-provider.com/.well-known/jwks.json"
+      audiences: "platform-api"
+      forwardOriginalToken: true
+
+---
+# AuthorizationPolicy for RBAC - Deny all by default
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-all
+  namespace: platform-apps
+spec:
+  rules: []
+
+---
+# AuthorizationPolicy - Allow internal communication
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-internal
+  namespace: platform-apps
+spec:
+  rules:
+    # Allow requests from platform-core namespace
+    - from:
+        - source:
+            namespaces: ["platform-core"]
+      to:
+        - operation:
+            methods: ["GET", "POST"]
+            paths: ["/api/*"]
+    # Allow Prometheus scraping
+    - from:
+        - source:
+            namespaces: ["platform-monitoring"]
+      to:
+        - operation:
+            ports: ["8080"]
+
+---
+# AuthorizationPolicy for ingress gateway
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-external
+  namespace: ingress-nginx
+spec:
+  rules:
+    # Allow authenticated external traffic
+    - from:
+        - source:
+            principals: ["cluster.local/ns/platform-apps/sa/*/"]
+      to:
+        - operation:
+            methods: ["GET", "POST", "PUT", "DELETE"]
+            paths: ["/api/*"]
+    # Allow unauthenticated traffic to health checks
+    - from:
+        - source:
+            notPrincipals: []
+      to:
+        - operation:
+            paths: ["/health", "/ready"]
+
+---
+# VirtualService for traffic management
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: platform-api
+  namespace: platform-apps
+spec:
+  hosts:
+    - platform-api.platform-apps.svc.cluster.local
+  http:
+    # Route 90% to v1, 10% to v2 for canary deployment
+    - match:
+        - uri:
+            prefix: "/api"
+      route:
+        - destination:
+            host: platform-api.platform-apps.svc.cluster.local
+            subset: v1
+            port:
+              number: 8080
+          weight: 90
+        - destination:
+            host: platform-api.platform-apps.svc.cluster.local
+            subset: v2
+            port:
+              number: 8080
+          weight: 10
+      timeout: 10s
+      retries:
+        attempts: 3
+        perTryTimeout: 2s
+
+---
+# DestinationRule for load balancing and circuit breaking
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: platform-api
+  namespace: platform-apps
+spec:
+  host: platform-api.platform-apps.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 100
+        maxRequestsPerConnection: 2
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minRequestVolume: 10
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+      trafficPolicy:
+        loadBalancer:
+          simple: ROUND_ROBIN
+    - name: v2
+      labels:
+        version: v2
+      trafficPolicy:
+        loadBalancer:
+          simple: LEAST_REQUEST
+
+---
+# Gateway for ingress configuration
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: platform-gateway
+  namespace: platform-apps
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: platform-tls  # Reference secret with cert/key
+      hosts:
+        - "api.platform.example.com"
+        - "*.platform.example.com"
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "*.platform.example.com"
+
+---
+# VirtualService for ingress routing
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: platform-ingress
+  namespace: platform-apps
+spec:
+  hosts:
+    - "api.platform.example.com"
+  gateways:
+    - platform-gateway
+  http:
+    - match:
+        - uri:
+            prefix: "/api/v1"
+      route:
+        - destination:
+            host: platform-api.platform-apps.svc.cluster.local
+            port:
+              number: 8080
+      corsPolicy:
+        allowOrigins:
+          - exact: "https://app.platform.example.com"
+        allowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+        allowHeaders:
+          - authorization
+          - content-type
+        maxAge: "24h"
+
+---
+# Telemetry for traffic metrics
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: platform-telemetry
+  namespace: platform-apps
+spec:
+  metrics:
+    - providers:
+        - name: prometheus
+      dimensions:
+        - request.path
+        - request.method
+        - response.code
+  tracing:
+    - providers:
+        - name: jaeger
+      randomSamplingPercentage: 10.0
+
+---
+# ProxyConfig for custom Envoy settings
+apiVersion: networking.istio.io/v1beta1
+kind: ProxyConfig
+metadata:
+  name: proxy-config
+  namespace: platform-apps
+spec:
+  concurrency: 2
+  environmentVariables:
+    ISTIO_METRICS_EXPANSION: "true"

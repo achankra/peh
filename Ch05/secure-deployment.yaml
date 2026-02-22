@@ -1,0 +1,76 @@
+# Chapter 5: Secure Deployment Configuration
+# ===========================================
+# Kubernetes Deployment with security best practices embedded.
+# Demonstrates: runAsNonRoot, readOnlyRootFilesystem, resource limits,
+# dropped capabilities, and service account configuration.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  labels:
+    app.kubernetes.io/name: demo-app
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/managed-by: platform-deploy
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-app
+  template:
+    metadata:
+      labels:
+        app: demo-app
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: demo-app-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: app
+        image: registry.company.com/apps/demo-app:1.0.0
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector.monitoring:4317"
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}

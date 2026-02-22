@@ -1,0 +1,154 @@
+# OPA Gatekeeper Policy: Require Resource Limits
+# This policy ensures all containers define CPU and memory requests/limits
+# Prevents resource exhaustion and enables cluster autoscaling
+
+---
+# ConstraintTemplate defines the policy logic in Rego
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequireresourcelimits
+  annotations:
+    description: "Requires all containers to define resource requests and limits"
+    examples: |
+      Valid example:
+      containers:
+      - name: app
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+      
+      Invalid example:
+      containers:
+      - name: app
+        # Missing resources specification
+
+spec:
+  # CRD generation - creates the Constraint CRD automatically
+  crd:
+    spec:
+      names:
+        kind: K8sRequireResourceLimits
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            excludedContainers:
+              type: array
+              items:
+                type: string
+              description: "Container names to exclude from this policy"
+
+  # Rego policy logic
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequireresourcelimits
+
+        # Deny rule for containers without resource limits
+        deny[msg] {
+          container := input_containers[_]
+          not container.name in input.parameters.excludedContainers
+          not has_resource_limits(container)
+          msg := sprintf(
+            "Container '%v' must define CPU and memory requests/limits",
+            [container.name]
+          )
+        }
+
+        # Helper: check if container has resource limits
+        has_resource_limits(container) {
+          container.resources.requests.cpu
+          container.resources.requests.memory
+          container.resources.limits.cpu
+          container.resources.limits.memory
+        }
+
+        # Get all containers from pod spec
+        input_containers[c] {
+          c := input.review.object.spec.containers[_]
+        }
+
+        # Also check init containers
+        input_containers[c] {
+          c := input.review.object.spec.initContainers[_]
+        }
+
+---
+# Constraint instantiates the policy on specific resources
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequireResourceLimits
+metadata:
+  name: require-resource-limits
+spec:
+  # Start in audit mode to avoid blocking deployments immediately
+  # Change to false to enable enforcement
+  match:
+    # Exclude system namespaces
+    excludedNamespaces: 
+      - gatekeeper-system
+      - kube-system
+      - kube-public
+      - kube-node-lease
+    
+    # Resources to validate
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "DaemonSet", "StatefulSet"]
+      - apiGroups: ["batch"]
+        kinds: ["Job", "CronJob"]
+  
+  # Policy parameters
+  parameters:
+    excludedContainers:
+      - istio-proxy  # Sidecar injections may have default limits
+
+  # Audit mode: log violations but don't block
+  auditOnly: true
+
+---
+# Example: Non-compliant Pod (will be rejected)
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: missing-limits
+# spec:
+#   containers:
+#   - name: app
+#     image: nginx:latest
+#     # No resources defined - VIOLATION
+
+---
+# Example: Compliant Pod (will be accepted)
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: compliant-pod
+# spec:
+#   containers:
+#   - name: app
+#     image: nginx:latest
+#     resources:
+#       requests:
+#         cpu: 100m
+#         memory: 128Mi
+#       limits:
+#         cpu: 500m
+#         memory: 512Mi
+
+---
+# Notes:
+# 1. All containers MUST have both requests and limits
+# 2. Requests must be less than or equal to limits
+# 3. Memory format: Mi, Gi, M, G (e.g., 128Mi, 1Gi)
+# 4. CPU format: m (millicores), no unit (e.g., 100m, 1)
+# 5. Typical sizing:
+#    - Light workload: requests=100m/128Mi, limits=500m/512Mi
+#    - Medium workload: requests=500m/512Mi, limits=2000m/2Gi
+#    - Heavy workload: requests=1000m/1Gi, limits=4000m/4Gi

@@ -1,0 +1,35 @@
+# Chapter 11: ConstraintTemplate for Required Resources
+# Listing 11.1 - Blueprint for policy definition (ConstraintTemplate)
+# This template creates a new policy kind: K8sRequiredResources
+# that validates all containers have resource requests and limits.
+
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredresources
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredResources
+      validation:
+        openAPIV3Schema:
+          properties:
+            message:
+              type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredresources
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.resources.requests
+          msg := sprintf("Container %v is missing resource requests", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.resources.limits
+          msg := sprintf("Container %v is missing resource limits", [container.name])
+        }

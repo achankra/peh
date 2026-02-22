@@ -1,0 +1,74 @@
+# Chapter 3 - Securing Platform Access
+# OPA Gatekeeper ConstraintTemplate: Require Resource Limits
+#
+# This ConstraintTemplate enforces that all containers in a Pod
+# specify CPU and memory resource limits. This prevents unbounded
+# resource consumption and ensures fair scheduling.
+#
+# Usage:
+#   1. Apply this template: kubectl apply -f template-resource-limits.yaml
+#   2. Create a Constraint resource referencing this template
+#   3. Any pod without resource limits will be rejected
+#
+# References:
+#   - https://open-policy-agent.github.io/gatekeeper/
+#   - Kubernetes Resource Management docs
+
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequireresourcelimits
+  annotations:
+    description: "Requires all containers to have CPU and memory limits set"
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequireResourceLimits
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            exemptImages:
+              type: array
+              description: "List of container images to exempt from this policy"
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequireresourcelimits
+
+        # Deny pods where any container is missing resource limits
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.resources.limits.cpu
+          msg := sprintf("Container '%v' must have CPU limits set", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.resources.limits.memory
+          msg := sprintf("Container '%v' must have memory limits set", [container.name])
+        }
+
+        # Also check init containers
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.initContainers[_]
+          not exempt_image(container.image)
+          not container.resources.limits.cpu
+          msg := sprintf("Init container '%v' must have CPU limits set", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.initContainers[_]
+          not exempt_image(container.image)
+          not container.resources.limits.memory
+          msg := sprintf("Init container '%v' must have memory limits set", [container.name])
+        }
+
+        # Check if image is in the exempt list
+        exempt_image(image) {
+          exempt := input.parameters.exemptImages[_]
+          image == exempt
+        }

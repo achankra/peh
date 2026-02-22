@@ -1,0 +1,312 @@
+################################################################################
+# RBAC Configuration for Platform Administrators
+#
+# Purpose: Define ClusterRole and ClusterRoleBinding for platform administrators
+# Principle: Platform admins have elevated permissions for cluster management
+#           but follow principle of least privilege with granular controls
+#
+# Usage: kubectl apply -f rbac-platform-admin.yaml
+################################################################################
+
+---
+# ClusterRole: platform-admin
+# Provides elevated permissions for platform engineering team
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platform-admin
+  labels:
+    app: platform-engineering
+    component: rbac
+rules:
+  # Full access to most core API resources
+  - apiGroups: [""]
+    resources: ["namespaces", "nodes", "pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Access to pod exec (for debugging)
+  - apiGroups: [""]
+    resources: ["pods/exec", "pods/portforward", "pods/log"]
+    verbs: ["get", "create"]
+  
+  # Full access to deployments and related resources
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Access to deployment rollbacks
+  - apiGroups: ["apps"]
+    resources: ["deployments/rollback"]
+    verbs: ["create"]
+  
+  # Full access to configuration resources
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Full access to persistent volumes and claims
+  - apiGroups: [""]
+    resources: ["persistentvolumes", "persistentvolumeclaims", "storageclasses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Full access to RBAC resources
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Access to service accounts
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Full access to ingresses
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Access to cert-manager resources
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates", "issuers", "clusterissuers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Access to batch jobs
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Access to custom resources (examples)
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
+  
+  # Access to view events
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch", "create", "patch"]
+  
+  # Access to metrics
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+  
+  # Limited cluster admin capabilities (excluding dangerous operations)
+  - apiGroups: [""]
+    resources: ["componentstatuses"]
+    verbs: ["get", "list", "watch"]
+  
+  # Access to logs endpoint
+  - apiGroups: [""]
+    resources: ["namespaces/log"]
+    verbs: ["get"]
+
+---
+# ClusterRoleBinding: platform-admin-binding
+# Binds platform-admin role to platform engineering team
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-admin-binding
+  labels:
+    app: platform-engineering
+    component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: platform-admin
+subjects:
+  # Replace with your actual user/group from identity provider
+  - kind: Group
+    name: "platform-engineers@company.example.com"
+    apiGroup: rbac.authorization.k8s.io
+  
+  # Service account example (uncomment to use)
+  # - kind: ServiceAccount
+  #   name: platform-admin-sa
+  #   namespace: platform-engineering
+
+---
+# ClusterRole: platform-admin-restricted
+# For senior platform engineers with additional restrictions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platform-admin-restricted
+  labels:
+    app: platform-engineering
+    component: rbac
+rules:
+  # Similar to platform-admin but with specific restrictions
+  - apiGroups: [""]
+    resources: ["namespaces", "pods", "services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  
+  # CANNOT delete critical resources
+  # CANNOT create/modify cluster-admin bindings
+
+---
+# ServiceAccount for platform admin automation
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: platform-admin-sa
+  namespace: platform-engineering
+  labels:
+    app: platform-engineering
+    component: rbac
+
+---
+# ClusterRoleBinding for platform admin service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-admin-sa-binding
+  labels:
+    app: platform-engineering
+    component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: platform-admin
+subjects:
+  - kind: ServiceAccount
+    name: platform-admin-sa
+    namespace: platform-engineering
+
+---
+# ClusterRole: platform-audit-viewer
+# For auditors who need read-only access to audit-related resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platform-audit-viewer
+  labels:
+    app: platform-engineering
+    component: rbac
+rules:
+  # Read-only access to everything
+  - apiGroups: [""]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  
+  - apiGroups: ["apps", "batch", "rbac.authorization.k8s.io", "networking.k8s.io"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  
+  # Specific access to audit logs (if audit logging is enabled)
+  - apiGroups: ["audit.k8s.io"]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+
+---
+# ClusterRoleBinding for audit viewers
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-audit-viewer-binding
+  labels:
+    app: platform-engineering
+    component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: platform-audit-viewer
+subjects:
+  # Replace with your security audit team
+  - kind: Group
+    name: "security-auditors@company.example.com"
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# ClusterRole: platform-operator
+# For operators managing specific workloads
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platform-operator
+  labels:
+    app: platform-engineering
+    component: rbac
+rules:
+  # Can manage deployments and related resources
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  
+  # Can manage services
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  
+  # Can view pods and logs
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  
+  # Can manage configmaps
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  
+  # CANNOT create namespaces
+  # CANNOT manage RBAC
+  # CANNOT delete resources
+
+---
+# ServiceAccount for platform operators
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: platform-operator-sa
+  namespace: platform-engineering
+  labels:
+    app: platform-engineering
+    component: rbac
+
+---
+# ClusterRoleBinding for platform operators
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-operator-binding
+  labels:
+    app: platform-engineering
+    component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: platform-operator
+subjects:
+  - kind: ServiceAccount
+    name: platform-operator-sa
+    namespace: platform-engineering
+
+################################################################################
+# Platform Admin RBAC Summary
+#
+# Roles Defined:
+#   1. platform-admin: Full elevated access for platform engineering
+#   2. platform-admin-restricted: Limited admin access with safety checks
+#   3. platform-audit-viewer: Read-only for security auditors
+#   4. platform-operator: Operational role for workload management
+#
+# Key Restrictions:
+#   - Cannot directly grant cluster-admin role (must request change)
+#   - Must use specific resource verbs, no wildcards
+#   - Service accounts scoped to specific namespace
+#   - Audit logging recommended for all admin operations
+#
+# Best Practices:
+#   1. Use groups for team-based access (not individual users)
+#   2. Regularly audit and review bindings
+#   3. Require approval for role changes
+#   4. Implement approval workflow for elevated operations
+#   5. Monitor admin user actions via audit logs
+################################################################################

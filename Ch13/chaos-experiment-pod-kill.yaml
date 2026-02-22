@@ -1,0 +1,308 @@
+# Pod Kill Chaos Experiment Definition
+# Compatible with Chaos Mesh (https://chaos-mesh.org/)
+# Tests system resilience to pod failures and recovery
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pod-kill-experiment
+  namespace: chaos-testing
+spec:
+  # Action to perform: kill pods
+  action: pod-kill
+  
+  # Target pod selection
+  selector:
+    # Target pods in specific namespaces
+    namespaces:
+      - default
+      - production
+    
+    # Select pods by label
+    labelSelectors:
+      app: api-service
+      resilience-test: "true"
+    
+    # Number of pods to select
+    nodes:
+      - "0"
+    
+    # Pod selector options
+    podPhaseSelectors:
+      - Running
+    
+    # Exclude specific pods from target
+    # excludeLabels:
+    #   critical: "true"
+  
+  # Duration for which chaos experiment runs
+  duration: "5m"
+  
+  # When to start the experiment
+  startingDeadlineSeconds: 60
+  
+  # Scheduling policy
+  scheduler:
+    cron: "0 2 * * *"  # Run daily at 2 AM
+
+---
+# LitmusChaos compatible Pod Kill experiment
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosEngine
+metadata:
+  name: pod-kill-chaos-engine
+  namespace: chaos-testing
+spec:
+  # Chaos experiment configuration
+  appinfo:
+    appns: default
+    applabel: "app=api-service"
+    appkind: deployment
+  
+  # Chaos service account
+  serviceAccountName: litmus-admin
+  
+  # RBAC configuration
+  rbac:
+    create: true
+  
+  # Monitoring
+  monitoring: false
+  
+  # Experiments to run
+  experiments:
+    - name: pod-delete
+      spec:
+        # Kubernetes resource configuration
+        components:
+          env:
+            # Total pods to kill
+            - name: TOTAL_CHAOS_DURATION
+              value: "30"
+            
+            # Pods per iteration to kill
+            - name: PODS_AFFECTED_PERC
+              value: "50"
+            
+            # Force delete (not graceful)
+            - name: FORCE
+              value: "true"
+            
+            # Grace period for pod deletion (0 = immediate)
+            - name: GRACEFUL_KILL
+              value: "false"
+            
+            # Interval between pod kills (seconds)
+            - name: DELAY
+              value: "5"
+            
+            # Target nodes (leave empty for all)
+            - name: TARGET_NODES
+              value: ""
+            
+            # Instance ID for tracking
+            - name: INSTANCE_ID
+              value: "pod-kill-1"
+          
+          # Pod resources
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 50m
+              memory: 32Mi
+          
+          # Image for chaos executor
+          image: litmuschaos/go-runner:latest
+          imagePullPolicy: IfNotPresent
+        
+        # Service account for experiment
+        serviceAccountName: litmus-admin
+
+---
+# Pod Kill Experiment with Enhanced Configuration
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pod-kill-advanced
+  namespace: chaos-testing
+spec:
+  action: pod-kill
+  
+  selector:
+    namespaces:
+      - production
+    labelSelectors:
+      component: stateless-worker
+      tier: backend
+    nodes:
+      - "0"
+  
+  # Kill mode: one or all
+  mode: "all"
+  
+  # Value is percentage of pods when mode is "all"
+  value: "50"
+  
+  # Duration of chaos
+  duration: "10m"
+  
+  # When to start
+  startingDeadlineSeconds: 0
+  
+  # Restart policy for killed pods
+  # graceful-kill waits for shutdown
+  # force-kill immediately terminates
+  gracePeriod: 0
+
+---
+# Pod Kill Experiment with Schedule
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Schedule
+metadata:
+  name: pod-kill-schedule
+  namespace: chaos-testing
+spec:
+  # Schedule frequency
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  
+  # Timezone
+  timezone: "UTC"
+  
+  # What to create/delete
+  type: PodChaos
+  
+  # Suspend scheduling
+  suspend: false
+  
+  # Concurrency policy
+  concurrencyPolicy: Forbid
+  
+  # Keep most recent N completed jobs
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  
+  # Pod chaos specification
+  podChaosTemplate:
+    metadata:
+      labels:
+        chaos-test: pod-kill
+    spec:
+      action: pod-kill
+      mode: fixed
+      value: "1"
+      duration: "5m"
+      startingDeadlineSeconds: 60
+      selector:
+        namespaces:
+          - production
+        labelSelectors:
+          app: api-service
+
+---
+# Workflow combining multiple pod kill experiments
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Workflow
+metadata:
+  name: pod-kill-workflow
+  namespace: chaos-testing
+spec:
+  # Entry point task
+  entrypoint: pod-kill-chain
+  
+  # Parallelism
+  parallelism: 2
+  
+  # Task templates
+  templates:
+    - name: pod-kill-chain
+      steps:
+        # First step: slow pod kill
+        - - name: slow-pod-kill
+            template: kill-1-pod
+        
+        # Second step: aggressive pod kill
+        - - name: aggressive-pod-kill
+            template: kill-many-pods
+        
+        # Third step: verify recovery
+        - - name: check-recovery
+            template: verify-running
+    
+    # Kill 1 pod at a time
+    - name: kill-1-pod
+      chaos:
+        podChaos:
+          action: pod-kill
+          duration: "5m"
+          selector:
+            namespaces:
+              - production
+            labelSelectors:
+              app: api-service
+          mode: fixed
+          value: "1"
+    
+    # Kill multiple pods
+    - name: kill-many-pods
+      chaos:
+        podChaos:
+          action: pod-kill
+          duration: "3m"
+          selector:
+            namespaces:
+              - production
+            labelSelectors:
+              app: api-service
+          mode: percentage
+          value: "50"
+    
+    # Verify pods are running again
+    - name: verify-running
+      statusCheck:
+        duration: "5m"
+        conditions:
+          - type: PodRunning
+            selector:
+              namespaces:
+                - production
+              labelSelectors:
+                app: api-service
+            expectedCount: "3"
+
+---
+# Prometheus ServiceMonitor for chaos metrics
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pod-kill-alerts
+  namespace: chaos-testing
+data:
+  alerts.yaml: |
+    groups:
+    - name: pod-kill-experiment
+      rules:
+      # Alert when pod kills spike (indicates chaos running)
+      - alert: PodKillExperimentRunning
+        expr: |
+          increase(kubernetes_pod_delete_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: info
+          experiment: pod-kill
+        annotations:
+          summary: "Pod kill experiment is running"
+          description: "{{ $value }} pods being killed"
+      
+      # Alert on unexpected pod restarts
+      - alert: HighPodRestartRate
+        expr: |
+          rate(kube_pod_container_status_restarts_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          experiment: pod-kill
+        annotations:
+          summary: "High pod restart rate during experiment"
+          description: "Restart rate: {{ $value | humanize }}/sec"

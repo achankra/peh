@@ -1,0 +1,28 @@
+# Chapter 12: Karpenter Provisioner Configuration
+# Listing 12.5 - Karpenter provisioner for intelligent node selection
+# Karpenter automatically selects the cheapest instance type that meets
+# your pod's resource requirements, including spot and on-demand options.
+
+apiVersion: karpenter.sh/v1alpha5
+kind: Provisioner
+metadata:
+  name: default
+spec:
+  requirements:
+    - key: karpenter.sh/capacity-type
+      operator: In
+      values: ["on-demand", "spot"]
+    - key: karpenter.sh/performance
+      operator: In
+      values: ["general-purpose", "compute-optimized"]
+    - key: node.kubernetes.io/instance-type
+      operator: In
+      values:
+        - "m5.large"
+        - "m5.xlarge"
+        - "m6i.large"
+        - "m6i.xlarge"
+        - "c5.large"
+  providerRef:
+    name: default
+  ttlSecondsUntilExpired: 2592000

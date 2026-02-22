@@ -1,0 +1,30 @@
+# Chapter 12: Vertical Pod Autoscaler Configuration
+# Listing 12.4 - VPA for checkout-api with Auto mode
+# VPA adjusts CPU/memory requests for the checkout-api based on actual usage,
+# with bounds to prevent under/over-provisioning.
+
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: checkout-api-vpa
+  namespace: team-checkout
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: checkout-api
+  updatePolicy:
+    updateMode: "Auto"
+    minReplicas: 2
+  resourcePolicy:
+    containerPolicies:
+      - containerName: checkout-api
+        minAllowed:
+          cpu: 50m
+          memory: 64Mi
+        maxAllowed:
+          cpu: 2
+          memory: 2Gi
+        controlledResources: ["cpu", "memory"]
+      - containerName: sidecar
+        controlledResources: []

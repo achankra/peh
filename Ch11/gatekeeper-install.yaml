@@ -1,0 +1,367 @@
+# OPA Gatekeeper Installation Manifest
+# Installs OPA Gatekeeper as an admission controller in Kubernetes
+# Alternative: Use Helm instead - helm install gatekeeper/gatekeeper -n gatekeeper-system --create-namespace
+
+---
+# Namespace for Gatekeeper
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gatekeeper-system
+  labels:
+    gatekeeper.sh/system: "yes"
+
+---
+# ValidatingWebhookConfiguration for admission control
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: gatekeeper-validating-webhook-configuration
+webhooks:
+  # Webhook for validating Pod creations and updates
+  - name: validation.gatekeeper.sh
+    clientConfig:
+      service:
+        name: gatekeeper-webhook-service
+        namespace: gatekeeper-system
+        path: /v1/admit
+      caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUQ0VENDQXNtZ0F3SUJBZ0lSUGJCZEovN21GY3RwUW5IUWd2VWxJREFOQmdrcWhraUc5dzBCQVFzRkFEQmoKTVJFd0R3WURWUVFHRXdoclozY3RKWEF3RXdZRFZRUUlFd3hYZVcxbGRXUmxjbk1zV1hWekxWTkJXVEVSTWF3RlZN
+
+    # Rules for which requests trigger this webhook
+    rules:
+      - operations: ["CREATE", "UPDATE"]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods", "services"]
+      - operations: ["CREATE", "UPDATE"]
+        apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        resources: ["deployments", "daemonsets", "statefulsets"]
+    
+    # Failure policy: Fail open (allow request) if webhook fails
+    failurePolicy: Ignore
+    sideEffects: None
+    admissionReviewVersions: ["v1", "v1beta1"]
+    
+    # Only apply to certain namespaces
+    namespaceSelector:
+      matchExpressions:
+        - key: admission.gatekeeper.sh/ignore
+          operator: DoesNotExist
+    
+    # Timeout for webhook calls
+    timeoutSeconds: 5
+
+---
+# MutatingWebhookConfiguration for mutation (optional)
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: gatekeeper-mutating-webhook-configuration
+webhooks:
+  - name: mutation.gatekeeper.sh
+    clientConfig:
+      service:
+        name: gatekeeper-webhook-service
+        namespace: gatekeeper-system
+        path: /v1/mutate
+      caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUQ0VENDQXNtZ0F3SUJBZ0lSUGJCZEovN21GY3RwUW5IUWd2VWxJREFOQmdrcWhraUc5dzBCQVFzRkFEQmoKTVJFd0R3WURWUVFHRXdoclozY3RKWEF3RXdZRFZRUUlFd3hYZVcxbGRXUmxjbk1zV1hWekxWTkJXVEVSTWF3RlZN
+
+    rules:
+      - operations: ["CREATE", "UPDATE"]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+    
+    failurePolicy: Ignore
+    sideEffects: None
+    admissionReviewVersions: ["v1", "v1beta1"]
+    timeoutSeconds: 5
+
+---
+# ServiceAccount for Gatekeeper
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gatekeeper-admin
+  namespace: gatekeeper-system
+
+---
+# Role for Gatekeeper
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gatekeeper-manager-role
+  namespace: gatekeeper-system
+rules:
+  - apiGroups: ["constraints.gatekeeper.sh"]
+    resources: ["*"]
+    verbs: ["create", "delete", "deleteCollection", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["templates.gatekeeper.sh"]
+    resources: ["constrainttemplates"]
+    verbs: ["create", "delete", "deleteCollection", "get", "list", "patch", "update", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+
+---
+# ClusterRole for Gatekeeper
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gatekeeper-manager-role
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "daemonsets", "statefulsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list"]
+
+---
+# RoleBinding for Gatekeeper
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gatekeeper-manager-rolebinding
+  namespace: gatekeeper-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gatekeeper-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: gatekeeper-admin
+    namespace: gatekeeper-system
+
+---
+# ClusterRoleBinding for Gatekeeper
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gatekeeper-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gatekeeper-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: gatekeeper-admin
+    namespace: gatekeeper-system
+
+---
+# Service for webhook
+apiVersion: v1
+kind: Service
+metadata:
+  name: gatekeeper-webhook-service
+  namespace: gatekeeper-system
+  labels:
+    gatekeeper.sh/system: "yes"
+spec:
+  ports:
+    - name: webhook
+      port: 443
+      targetPort: 8888
+      protocol: TCP
+  selector:
+    gatekeeper.sh/system: "yes"
+  type: ClusterIP
+
+---
+# Deployment for Gatekeeper Controller Manager
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gatekeeper-controller-manager
+  namespace: gatekeeper-system
+  labels:
+    gatekeeper.sh/system: "yes"
+    app: gatekeeper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      gatekeeper.sh/system: "yes"
+      app: gatekeeper
+  template:
+    metadata:
+      labels:
+        gatekeeper.sh/system: "yes"
+        app: gatekeeper
+    spec:
+      serviceAccountName: gatekeeper-admin
+      containers:
+        - name: manager
+          image: openpolicyagent/gatekeeper:v3.14.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: webhook
+              containerPort: 8888
+              protocol: TCP
+            - name: metrics
+              containerPort: 8888
+              protocol: TCP
+          
+          # Security context for pod
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 999
+          
+          # Environment variables
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          
+          # Resource requests and limits
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          
+          # Probes
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8888
+              scheme: HTTPS
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8888
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          # Volume mounts
+          volumeMounts:
+            - mountPath: /tmp/k8s-webhook-server/serving-certs
+              name: webhook-certs
+              readOnly: true
+      
+      # Pod-level security context
+      securityContext:
+        fsGroup: 999
+      
+      # Volumes
+      volumes:
+        - name: webhook-certs
+          secret:
+            secretName: gatekeeper-webhook-server-cert
+            optional: true
+
+---
+# Deployment for Gatekeeper Audit
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gatekeeper-audit
+  namespace: gatekeeper-system
+  labels:
+    gatekeeper.sh/system: "yes"
+    app: gatekeeper-audit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      gatekeeper.sh/system: "yes"
+      app: gatekeeper-audit
+  template:
+    metadata:
+      labels:
+        gatekeeper.sh/system: "yes"
+        app: gatekeeper-audit
+    spec:
+      serviceAccountName: gatekeeper-admin
+      containers:
+        - name: audit
+          image: openpolicyagent/gatekeeper:v3.14.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 8888
+              protocol: TCP
+          
+          # Arguments for audit mode
+          args:
+            - audit
+            - --log-level=info
+            - --audit-interval=60s
+          
+          # Security context
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 999
+          
+          # Resource limits
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          
+          # Liveness probe
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: 8888
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+---
+# ConfigMap for Gatekeeper audit logs
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gatekeeper-audit-config
+  namespace: gatekeeper-system
+data:
+  audit-interval: "60s"
+  audit-log-level: "info"
+  # Metrics scrape interval for Prometheus
+  metrics-port: "8888"
+
+---
+# Notes on setup:
+# 1. This manifest deploys a basic Gatekeeper setup
+# 2. For production, use Helm chart: helm install gatekeeper/gatekeeper -n gatekeeper-system --create-namespace
+# 3. TLS certificates must be provisioned separately (use cert-manager or manual certificates)
+# 4. Webhook CA bundle must be injected (use mutating-webhook-injection)
+# 5. Adjust resource limits based on your cluster size
+# 6. Consider using affinity rules for HA deployments

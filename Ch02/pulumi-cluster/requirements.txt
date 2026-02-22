@@ -1,0 +1,5 @@
+pulumi>=3.0.0
+pulumi-aws>=6.0.0
+pulumi-kubernetes>=4.0.0
+pulumi-eks>=1.0.0
+pyyaml>=6.0

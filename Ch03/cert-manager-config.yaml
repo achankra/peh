@@ -1,0 +1,266 @@
+################################################################################
+# cert-manager Configuration for TLS Certificate Management
+#
+# Purpose: Set up cert-manager ClusterIssuer for automatic TLS certificate
+#         generation and renewal using Let's Encrypt
+#
+# Prerequisites:
+#   - cert-manager installed: helm install cert-manager jetstack/cert-manager
+#   - kubectl configured
+#
+# Usage: kubectl apply -f cert-manager-config.yaml
+################################################################################
+
+---
+# Namespace for cert-manager resources (if not using default cert-manager ns)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform-engineering
+  labels:
+    name: platform-engineering
+    environment: production
+
+---
+# ClusterIssuer: Let's Encrypt Staging
+# Used for testing before switching to production
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+  labels:
+    app: platform-engineering
+    component: tls
+spec:
+  acme:
+    # Let's Encrypt staging server (use for testing)
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: admin@company.example.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-key
+    # HTTP01 challenge for certificate validation
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+
+---
+# ClusterIssuer: Let's Encrypt Production
+# Used for actual TLS certificates (rate-limited)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-production
+  labels:
+    app: platform-engineering
+    component: tls
+spec:
+  acme:
+    # Let's Encrypt production server
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@company.example.com
+    privateKeySecretRef:
+      name: letsencrypt-production-key
+    # HTTP01 challenge for certificate validation
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+
+---
+# ClusterIssuer: Self-Signed (for internal/testing)
+# Useful for development and internal services
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+  labels:
+    app: platform-engineering
+    component: tls
+spec:
+  selfSigned: {}
+
+---
+# ClusterIssuer: Self-Signed CA Root
+# Create a self-signed CA for internal PKI
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-ca
+  labels:
+    app: platform-engineering
+    component: tls
+spec:
+  selfSigned: {}
+
+---
+# Certificate: Internal CA Certificate
+# Generate a self-signed CA that can issue other certificates
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: internal-ca
+  namespace: platform-engineering
+  labels:
+    app: platform-engineering
+    component: tls
+spec:
+  secretName: internal-ca-secret
+  duration: 87600h # 10 years
+  renewBefore: 730h # 30 days
+  commonName: "internal-ca.company.local"
+  isCA: true
+  issuerRef:
+    name: selfsigned-ca
+    kind: ClusterIssuer
+
+---
+# ClusterIssuer: Internal CA Issuer
+# Issues certificates using the internal CA
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: internal-ca-issuer
+  labels:
+    app: platform-engineering
+    component: tls
+spec:
+  ca:
+    secretName: internal-ca-secret
+
+---
+# Certificate: Platform API Server TLS
+# TLS certificate for platform API endpoint
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: platform-api-cert
+  namespace: platform-engineering
+  labels:
+    app: platform-engineering
+    component: tls
+    service: api
+spec:
+  secretName: platform-api-tls
+  duration: 2160h # 90 days
+  renewBefore: 360h # 15 days
+  commonName: "api.platform.company.local"
+  dnsNames:
+    - "api.platform.company.local"
+    - "api.platform.example.com"
+    - "localhost"
+  issuerRef:
+    name: internal-ca-issuer
+    kind: ClusterIssuer
+
+---
+# Certificate: Demo App TLS
+# TLS certificate for demo application
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: demo-app-cert
+  namespace: platform-engineering
+  labels:
+    app: platform-engineering
+    component: tls
+    service: demo-app
+spec:
+  secretName: demo-app-tls
+  duration: 2160h # 90 days
+  renewBefore: 360h # 15 days
+  commonName: "demo-app.company.local"
+  dnsNames:
+    - "demo-app.company.local"
+    - "demo-app.example.com"
+    - "www.demo-app.example.com"
+  issuerRef:
+    name: letsencrypt-production
+    kind: ClusterIssuer
+
+---
+# Certificate: Keycloak TLS
+# TLS certificate for Keycloak identity provider
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: keycloak-cert
+  namespace: platform-engineering
+  labels:
+    app: platform-engineering
+    component: tls
+    service: keycloak
+spec:
+  secretName: keycloak-tls
+  duration: 2160h # 90 days
+  renewBefore: 360h # 15 days
+  commonName: "keycloak.company.local"
+  dnsNames:
+    - "keycloak.company.local"
+    - "keycloak.example.com"
+    - "auth.example.com"
+  issuerRef:
+    name: letsencrypt-production
+    kind: ClusterIssuer
+
+---
+# Certificate: Wildcard Certificate (optional)
+# Single certificate for all subdomains
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-cert
+  namespace: platform-engineering
+  labels:
+    app: platform-engineering
+    component: tls
+    type: wildcard
+spec:
+  secretName: wildcard-tls
+  duration: 2160h # 90 days
+  renewBefore: 360h # 15 days
+  commonName: "*.platform.company.local"
+  dnsNames:
+    - "*.platform.company.local"
+    - "platform.company.local"
+  issuerRef:
+    name: internal-ca-issuer
+    kind: ClusterIssuer
+
+################################################################################
+# Verification and Testing
+#
+# Check certificate status:
+#   kubectl get certificates -n platform-engineering
+#   kubectl describe certificate demo-app-cert -n platform-engineering
+#
+# View certificate details:
+#   kubectl get secret demo-app-tls -n platform-engineering -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -text -noout
+#
+# Check issuer status:
+#   kubectl get clusterissuer
+#   kubectl describe clusterissuer letsencrypt-production
+#
+# Monitor cert-manager logs:
+#   kubectl logs -n cert-manager deployment/cert-manager
+#
+# Test certificate renewal:
+#   kubectl describe cert demo-app-cert -n platform-engineering | grep -A 5 "Status"
+#
+################################################################################
+
+# Useful kubectl commands:
+# 
+# List all certificates:
+#   kubectl get certificates -A
+#
+# Watch certificate renewal:
+#   kubectl get cert -A -w
+#
+# Delete and force renewal:
+#   kubectl delete secret demo-app-tls -n platform-engineering
+#   kubectl delete cert demo-app-cert -n platform-engineering
+#   kubectl apply -f cert-manager-config.yaml
+#
+# Check certificate validity period:
+#   kubectl get cert -n platform-engineering -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.duration}{"\t"}{.spec.renewBefore}{"\n"}{end}'

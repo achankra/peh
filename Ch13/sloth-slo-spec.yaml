@@ -1,0 +1,130 @@
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: demo-app-slos
+  namespace: monitoring
+spec:
+  service: demo-app
+  description: "Service Level Objectives for demo-app"
+  
+  # Labels for Prometheus
+  labels:
+    product: demo-app
+    team: platform
+  
+  # Objectives configuration
+  objectives:
+    # Availability SLO
+    - name: availability
+      displayName: "Availability"
+      description: "Service availability measured by successful HTTP requests"
+      
+      # Target: 99.9% availability over 30 days
+      target: 99.9
+      window: 30d
+      
+      # Indicator: Ratio of successful requests to total requests
+      indicator:
+        type: prometheus
+        metrics:
+          # Prometheus metrics for availability calculation
+          good:
+            prometheus:
+              query: |
+                sum(rate(http_requests_total{job="demo-app",status=~"2.."}[5m]))
+          
+          total:
+            prometheus:
+              query: |
+                sum(rate(http_requests_total{job="demo-app"}[5m]))
+      
+      # Error budgeting configuration
+      alerting:
+        - name: availability-error-budget
+          pageAlert: true
+          ticketAlert: false
+          
+          # Alert when error budget is exhausted in short window
+          rules:
+            - window: 1h
+              threshold: 0.1
+              severity: critical
+            
+            - window: 6h
+              threshold: 0.25
+              severity: warning
+            
+            - window: 30d
+              threshold: 0.5
+              severity: info
+    
+    # Latency SLO
+    - name: latency
+      displayName: "Latency"
+      description: "99% of requests respond within 500ms"
+      
+      # Target: 99% latency SLO over 30 days
+      target: 99
+      window: 30d
+      
+      # Indicator: Latency-based good/total ratio
+      indicator:
+        type: prometheus
+        metrics:
+          # Requests under 500ms threshold
+          good:
+            prometheus:
+              query: |
+                sum(rate(http_request_duration_seconds_bucket{job="demo-app",le="0.5"}[5m]))
+          
+          # Total requests
+          total:
+            prometheus:
+              query: |
+                sum(rate(http_requests_total{job="demo-app"}[5m]))
+      
+      # Error budgeting configuration
+      alerting:
+        - name: latency-error-budget
+          pageAlert: true
+          ticketAlert: false
+          
+          # Alert when error budget is exhausted
+          rules:
+            - window: 1h
+              threshold: 0.1
+              severity: critical
+            
+            - window: 6h
+              threshold: 0.25
+              severity: warning
+            
+            - window: 30d
+              threshold: 0.5
+              severity: info
+    
+    # Optional: Throughput SLO
+    - name: throughput
+      displayName: "Throughput"
+      description: "Service maintains minimum throughput"
+      
+      target: 99
+      window: 30d
+      
+      indicator:
+        type: prometheus
+        metrics:
+          good:
+            prometheus:
+              query: |
+                sum(rate(http_requests_total{job="demo-app"}[5m])) > 1000
+          
+          total:
+            prometheus:
+              query: |
+                sum(rate(http_requests_total{job="demo-app"}[5m]))
+      
+      alerting:
+        - name: throughput-slo-alert
+          pageAlert: false
+          ticketAlert: true

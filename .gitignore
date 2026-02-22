@@ -1,0 +1,102 @@
+# ===============================
+# macOS
+# ===============================
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ===============================
+# Python
+# ===============================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.env/
+.venv/
+ENV/
+env/
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ===============================
+# IDE / Editors
+# ===============================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ===============================
+# Logs
+# ===============================
+*.log
+logs/
+
+# ===============================
+# Terraform
+# ===============================
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+.terraform.lock.hcl
+
+# ===============================
+# Kubernetes / Helm
+# ===============================
+*.secret.yaml
+*.secrets.yaml
+
+# ===============================
+# Node (if any Backstage / tooling exists)
+# ===============================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===============================
+# Environment / Secrets
+# ===============================
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# ===============================
+# OS / Temp Files
+# ===============================
+tmp/
+temp/
+*.tmp
+
+# ===============================
+# Test / Coverage
+# ===============================
+.coverage
+htmlcov/
+.pytest_cache/
+
+# ===============================
+# Generated Diagrams (optional)
+# Uncomment if you generate diagrams
+# ===============================
+# diagrams/
+# *.png
+# *.svg
+
+# ===============================
+# Large Local Assets
+# ===============================
+*.zip
+*.tar.gz
+*.tgz

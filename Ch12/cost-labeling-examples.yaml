@@ -1,0 +1,143 @@
+# Chapter 12: Cost Allocation Labels
+# Listing 12.1 - Namespace with cost allocation labels
+# Listing 12.2 - Deployment with matching cost labels
+# These labels enable OpenCost to attribute costs to teams and business units.
+
+---
+# Namespace with cost allocation labels
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-checkout
+  labels:
+    team: checkout
+    cost-center: "4521"
+    business-unit: payments
+
+---
+# Deployment with cost allocation labels
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  namespace: team-checkout
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: checkout-api
+  template:
+    metadata:
+      labels:
+        app: checkout-api
+        team: checkout
+        cost-center: "4521"
+    spec:
+      containers:
+        - name: checkout-api
+          image: myregistry/checkout-api:v1
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+# Listing 12.6 - Node taint for spot instances
+apiVersion: v1
+kind: Node
+metadata:
+  name: node-spot-1
+spec:
+  taints:
+    - key: instance-type
+      value: spot
+      effect: NoSchedule
+
+---
+# Listing 12.7 - Batch processor deployment with spot tolerance
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: batch-processor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: batch-processor
+  template:
+    metadata:
+      labels:
+        app: batch-processor
+    spec:
+      tolerations:
+        - key: instance-type
+          operator: Equal
+          value: spot
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: karpenter.sh/capacity-type
+                    operator: In
+                    values:
+                      - spot
+      containers:
+        - name: batch-processor
+          image: your-image:latest
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+# Listing 12.9 - ResourceQuota for team namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-analytics
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: analytics-quota
+  namespace: team-analytics
+spec:
+  hard:
+    requests.cpu: "10"
+    requests.memory: "20Gi"
+    limits.cpu: "20"
+    limits.memory: "40Gi"
+    pods: "50"
+    persistentvolumeclaims: "10"
+
+---
+# Listing 12.10 - LimitRange for default container limits
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-limits
+  namespace: team-analytics
+spec:
+  limits:
+    - type: Container
+      min:
+        cpu: "50m"
+        memory: "64Mi"
+      max:
+        cpu: "2"
+        memory: "4Gi"
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"

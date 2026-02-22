@@ -1,0 +1,50 @@
+# Chapter 13: Self-Service Backup Configuration
+# Listing 13.2 - Helm chart values and self-service labeling pattern
+# Teams enable backup by simply labeling their resources with "backup: enabled".
+# This is part of the platform-backup-config Helm chart.
+
+# values.yaml for platform-backup-config chart
+backup:
+  enabled: true
+  schedule: "0 3 * * *"  # Daily at 3 AM
+  retention: "30d"
+
+  selectors:
+    matchLabels:
+      backup: enabled
+
+  excludedNamespaces:
+    - kube-system
+    - velero
+
+---
+# Teams enable backup by labeling their resources:
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  labels:
+    backup: enabled
+data:
+  config: |
+    key: value
+
+---
+# Example: Restore script reference
+# The backup restore workflow (from manuscript):
+#
+#   LATEST_BACKUP=$(velero backup get \
+#     --sort-by=.metadata.creationTimestamp | tail -1)
+#
+#   # Restore to test environment
+#   velero restore create --from-backup $LATEST_BACKUP \
+#     --namespace-mappings production=test-restore \
+#     --include-namespaces production
+#
+#   # Run validation checks
+#   kubectl get pods -n test-restore
+#   kubectl logs -n test-restore -l app=api --tail=50
+#
+#   # Verify data integrity
+#   kubectl exec -n test-restore deployment/validator -- \
+#     /scripts/validate-data.sh

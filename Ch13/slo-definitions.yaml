@@ -1,0 +1,237 @@
+# SLO Definitions for Platform Engineering Resilience
+# This file contains Prometheus recording rules and alerts for Service Level Objectives
+# Compatible with Sloth (https://sloth.dev/) SLO generator
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: slo-definitions
+  namespace: monitoring
+data:
+  slo-rules.yaml: |
+    # SLO Recording Rules for Prometheus
+    # These rules calculate availability and latency SLIs and SLOs
+    
+    groups:
+    - name: slo.api.rules
+      interval: 30s
+      rules:
+      # API Service Availability SLI
+      # Measures successful requests / total requests
+      - record: slo:api:availability:ratio
+        expr: |
+          (
+            sum(rate(http_requests_total{service="api", status=~"2.."}[5m]))
+            /
+            sum(rate(http_requests_total{service="api"}[5m]))
+          )
+      
+      # API Service Latency SLI - p99
+      # 99th percentile response time in seconds
+      - record: slo:api:latency:p99
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum(rate(http_request_duration_seconds_bucket{service="api"}[5m])) by (le)
+          )
+      
+      # API Service Latency SLI - p95
+      # 95th percentile response time in seconds
+      - record: slo:api:latency:p95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(http_request_duration_seconds_bucket{service="api"}[5m])) by (le)
+          )
+      
+      # Error Budget for API Availability
+      # SLO target: 99.9% (0.1% error budget per month)
+      # This calculates remaining budget as a ratio (1.0 = full budget)
+      - record: slo:api:availability:error_budget_ratio
+        expr: |
+          (
+            (0.999 - slo:api:availability:ratio)
+            /
+            (1 - 0.999)
+          )
+      
+      # Error Budget Burn Rate (4-week window)
+      # How fast we're burning through our monthly error budget
+      - record: slo:api:availability:burn_rate:4w
+        expr: |
+          (1 - slo:api:availability:ratio) / (1 - 0.999)
+    
+    - name: slo.database.rules
+      interval: 30s
+      rules:
+      # Database Connection Pool Availability
+      - record: slo:database:availability:ratio
+        expr: |
+          (
+            sum(rate(db_connection_success_total[5m]))
+            /
+            sum(rate(db_connection_attempts_total[5m]))
+          )
+      
+      # Database Query Latency p99
+      - record: slo:database:latency:p99
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum(rate(db_query_duration_seconds_bucket[5m])) by (le)
+          )
+      
+      # Database Error Budget
+      - record: slo:database:availability:error_budget_ratio
+        expr: |
+          (
+            (0.999 - slo:database:availability:ratio)
+            /
+            (1 - 0.999)
+          )
+    
+    - name: slo.cache.rules
+      interval: 30s
+      rules:
+      # Cache Hit Ratio SLI
+      - record: slo:cache:hit_ratio:ratio
+        expr: |
+          (
+            sum(rate(cache_hits_total[5m]))
+            /
+            (
+              sum(rate(cache_hits_total[5m]))
+              +
+              sum(rate(cache_misses_total[5m]))
+            )
+          )
+      
+      # Cache Request Latency p99
+      - record: slo:cache:latency:p99
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum(rate(cache_request_duration_seconds_bucket[5m])) by (le)
+          )
+    
+    - name: slo.alerts
+      interval: 30s
+      rules:
+      # Alert when error budget burn rate exceeds 10% per day
+      # This gives teams 10 days before exhausting monthly budget
+      - alert: SLOErrorBudgetBurnRateHigh
+        expr: slo:api:availability:burn_rate:4w > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          slo: api
+        annotations:
+          summary: "{{ $labels.slo }} error budget burning too fast"
+          description: "Error budget burn rate is {{ $value | humanize }}. SLO target is 99.9% (0.1% error budget)."
+      
+      # Alert when error budget is nearly exhausted (less than 20%)
+      - alert: SLOErrorBudgetLow
+        expr: slo:api:availability:error_budget_ratio > 0.8
+        for: 10m
+        labels:
+          severity: critical
+          slo: api
+        annotations:
+          summary: "{{ $labels.slo }} error budget critically low"
+          description: "Error budget remaining: {{ $value | humanizePercentage }}. Freeze new deployments."
+      
+      # Alert on API availability dropping below SLO
+      - alert: SLOAvailabilityViolation
+        expr: slo:api:availability:ratio < 0.999
+        for: 5m
+        labels:
+          severity: critical
+          slo: api
+        annotations:
+          summary: "{{ $labels.slo }} availability SLO violated"
+          description: "Availability is {{ $value | humanizePercentage }}, below SLO target of 99.9%"
+      
+      # Alert on high latency
+      - alert: SLOLatencyViolation
+        expr: slo:api:latency:p99 > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          slo: api
+        annotations:
+          summary: "{{ $labels.slo }} latency SLO violated"
+          description: "p99 latency is {{ $value | humanizeDuration }}, exceeds SLO target of 500ms"
+
+---
+# SLO Definitions in Sloth Format (optional, for SLO generation)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sloth-slo-config
+  namespace: monitoring
+data:
+  sloth-config.yaml: |
+    # Sloth SLO Configuration
+    # Sloth auto-generates Prometheus recording rules from these definitions
+    
+    version: "1"
+    
+    slos:
+    - name: api-availability
+      description: "API Service Availability"
+      objective: 99.9
+      indicatorType: prometheus
+      indicators:
+        - name: request-success-ratio
+          description: "Ratio of successful HTTP requests"
+          query: |
+            (
+              sum(rate(http_requests_total{service="api", status=~"2.."}[5m]))
+              /
+              sum(rate(http_requests_total{service="api"}[5m]))
+            )
+    
+    - name: api-latency
+      description: "API Service Latency (p99)"
+      objective: 99.0
+      indicatorType: prometheus
+      indicators:
+        - name: request-latency-p99
+          description: "99th percentile HTTP request latency"
+          query: |
+            histogram_quantile(
+              0.99,
+              sum(rate(http_request_duration_seconds_bucket{service="api"}[5m])) by (le)
+            ) * 1000 < 500
+    
+    - name: database-availability
+      description: "Database Connection Availability"
+      objective: 99.9
+      indicatorType: prometheus
+      indicators:
+        - name: connection-success-ratio
+          description: "Ratio of successful database connections"
+          query: |
+            (
+              sum(rate(db_connection_success_total[5m]))
+              /
+              sum(rate(db_connection_attempts_total[5m]))
+            )
+    
+    - name: cache-hit-ratio
+      description: "Cache Hit Ratio"
+      objective: 95.0
+      indicatorType: prometheus
+      indicators:
+        - name: cache-hit-ratio
+          description: "Ratio of cache hits to total requests"
+          query: |
+            (
+              sum(rate(cache_hits_total[5m]))
+              /
+              (
+                sum(rate(cache_hits_total[5m]))
+                +
+                sum(rate(cache_misses_total[5m]))
+              )
+            ) * 100 >= 95

@@ -1,0 +1,42 @@
+---
+# Starter tier ResourceQuota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: quota-starter
+  namespace: team-namespace-placeholder
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: "4Gi"
+    pods: "10"
+    limits.cpu: "4"
+    limits.memory: "8Gi"
+---
+# Standard tier ResourceQuota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: quota-standard
+  namespace: team-namespace-placeholder
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: "16Gi"
+    pods: "50"
+    limits.cpu: "16"
+    limits.memory: "32Gi"
+---
+# Enterprise tier ResourceQuota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: quota-enterprise
+  namespace: team-namespace-placeholder
+spec:
+  hard:
+    requests.cpu: "32"
+    requests.memory: "64Gi"
+    pods: "200"
+    limits.cpu: "64"
+    limits.memory: "128Gi"

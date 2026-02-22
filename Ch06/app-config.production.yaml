@@ -1,0 +1,225 @@
+# Backstage Production App Configuration
+# This file contains the complete application configuration for a production Backstage deployment
+# Includes auth, catalog, integrations, and plugin configurations
+
+app:
+  title: Backstage Developer Portal
+  baseUrl: https://backstage.example.com
+  listen:
+    port: 7007
+
+backend:
+  # Base URL for the backend API
+  baseUrl: https://backstage.example.com
+  listen:
+    port: 7007
+    host: 0.0.0.0
+  
+  # Database Configuration
+  database:
+    client: pg
+    connection:
+      host: ${DB_HOST:backstage-postgresql}
+      port: ${DB_PORT:5432}
+      user: ${DB_USER:backstage}
+      password: ${DB_PASSWORD}
+      database: ${DB_NAME:backstage}
+      ssl:
+        rejectUnauthorized: false
+  
+  # Cache configuration
+  cache:
+    store: memory
+    ttl: 600
+  
+  # CORS configuration
+  cors:
+    origin: https://backstage.example.com
+    credentials: true
+  
+  # Authentication configuration
+  auth:
+    # Session configuration
+    session:
+      secret: ${SESSION_SECRET}
+      ttl: 3600
+  
+  # Catalog plugin configuration
+  catalog:
+    # Import locations to be added to the catalog
+    locations:
+      # Local example entities
+      - type: url
+        target: https://github.com/myorg/platform-catalog/blob/main/catalog-info.yaml
+        rules:
+          - allow:
+              - Component
+              - API
+              - Group
+              - User
+              - Resource
+              - Domain
+              - System
+      # Hosted catalog
+      - type: url
+        target: https://github.com/myorg/services/tree/main/catalog
+        rules:
+          - allow: [Component, API]
+    
+    # Schedule for catalog refresh
+    schedule:
+      frequency:
+        minutes: 30
+      timeout:
+        minutes: 3
+      initialDelay:
+        seconds: 15
+  
+  # Kubernetes integration
+  kubernetes:
+    serviceLocatorMethod:
+      type: multiTenant
+    clusterLocatorMethods:
+      - type: config
+        clusters:
+          - name: primary
+            url: https://kubernetes.default.svc.cluster.local
+            authProvider: serviceAccount
+            skipTLSVerify: false
+            customResources:
+              - group: argoproj.io
+                apiVersion: v1
+                plural: applications
+  
+  # GitHub integration
+  integrations:
+    github:
+      - host: github.com
+        token: ${GITHUB_TOKEN}
+        apiBaseUrl: https://api.github.com
+    
+    # GitLab integration (if used)
+    gitlab:
+      - host: gitlab.com
+        token: ${GITLAB_TOKEN}
+    
+    # Jira integration (if used)
+    jira:
+      - host: jira.example.com
+        username: ${JIRA_USER}
+        password: ${JIRA_PASSWORD}
+
+# Frontend configuration
+frontend:
+  app:
+    title: Backstage Developer Portal
+    baseUrl: https://backstage.example.com
+  
+  # Customize the appearance
+  branding:
+    fullLogo: true
+    iconLogo: https://example.com/backstage-icon.png
+    fullLogoUrl: https://example.com/backstage-logo.png
+  
+  # Default routes
+  routes:
+    catalogIndex: /catalog
+    catalogEntity: /catalog/:namespace/:kind/:name
+    docsIndex: /docs
+    managePlugins: /admin/plugins
+
+# OAuth/OIDC Authentication Configuration (Keycloak)
+auth:
+  environment: production
+  
+  providers:
+    # Primary OAuth provider - Keycloak
+    oauth2Proxy:
+      development:
+        clientId: ${AUTH_CLIENT_ID:backstage}
+        clientSecret: ${AUTH_CLIENT_SECRET}
+        authorizationUrl: ${KEYCLOAK_URL:https://keycloak.example.com}/auth/realms/${KEYCLOAK_REALM:backstage}/protocol/openid-connect/auth
+        tokenUrl: ${KEYCLOAK_URL}/auth/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token
+        userInfoUrl: ${KEYCLOAK_URL}/auth/realms/${KEYCLOAK_REALM}/protocol/openid-connect/userinfo
+        scope: openid profile email
+    
+    # Google OAuth (alternative)
+    google:
+      development:
+        clientId: ${GOOGLE_CLIENT_ID}
+        clientSecret: ${GOOGLE_CLIENT_SECRET}
+    
+    # GitHub OAuth (alternative)
+    github:
+      development:
+        clientId: ${GITHUB_OAUTH_CLIENT_ID}
+        clientSecret: ${GITHUB_OAUTH_CLIENT_SECRET}
+
+# Plugin configuration
+plugins:
+  # Catalog plugin
+  catalog:
+    rules:
+      - allow:
+          - Component
+          - API
+          - Group
+          - User
+          - Resource
+          - Domain
+          - System
+          - Location
+
+# Feature flags
+featureFlags:
+  catalog:
+    graphql:
+      enabled: true
+  search:
+    elasticsearch:
+      enabled: false
+  techdocs:
+    enabled: true
+
+# Logging configuration
+logger:
+  level: info
+  format: json
+
+# Permission system
+permission:
+  enabled: true
+  rbac:
+    policies-csv-file: /etc/rbac/policies.csv
+    roles-csv-file: /etc/rbac/roles.csv
+
+# ArgoCD integration (for deployment visualization)
+argocd:
+  appLocatorMethods:
+    - type: config
+      instances:
+        - name: argocd
+          url: https://argocd.example.com
+          token: ${ARGOCD_TOKEN}
+
+# TechDocs configuration
+techdocs:
+  builder: external
+  publisher:
+    type: azureBlobStorage
+    azureBlobStorage:
+      containerName: techdocs
+      accountName: ${AZURE_ACCOUNT_NAME}
+      accountKey: ${AZURE_ACCOUNT_KEY}
+
+# Proxy configuration for backend services
+proxy:
+  "/example":
+    target: "http://example.com"
+    changeOrigin: true
+
+# Scaffolder plugin for template-based project creation
+scaffolder:
+  templates:
+    url: https://github.com/myorg/backstage-templates/tree/main/templates
+

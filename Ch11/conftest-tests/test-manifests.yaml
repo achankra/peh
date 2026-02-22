@@ -1,0 +1,93 @@
+# Chapter 11: Sample Kubernetes Manifests for Conftest Testing
+# =============================================================
+# These manifests are used to validate OPA policies with conftest.
+# Run: conftest test conftest-tests/test-manifests.yaml --policy conftest-tests/
+#
+# Contains:
+#   1. Compliant deployment (should PASS all policies)
+#   2. Non-compliant: missing resource limits (should FAIL)
+#   3. Non-compliant: privileged container (should FAIL)
+
+---
+# COMPLIANT: This deployment follows all platform policies
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compliant-web-app
+  labels:
+    app.kubernetes.io/name: compliant-web-app
+    app.kubernetes.io/team: team-alpha
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: compliant-web-app
+  template:
+    metadata:
+      labels:
+        app: compliant-web-app
+        app.kubernetes.io/name: compliant-web-app
+    spec:
+      containers:
+      - name: web
+        image: registry.company.com/apps/web-app:v1.0.0
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        securityContext:
+          privileged: false
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+
+---
+# NON-COMPLIANT: Missing resource limits
+# Expected violation: K8sContainerLimits
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: no-limits-worker
+  labels:
+    app.kubernetes.io/name: no-limits-worker
+    app.kubernetes.io/team: team-beta
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: no-limits-worker
+  template:
+    metadata:
+      labels:
+        app: no-limits-worker
+    spec:
+      containers:
+      - name: worker
+        image: registry.company.com/apps/worker:v2.0.0
+        # NOTE: No resources.limits defined - violates policy
+
+---
+# NON-COMPLIANT: Privileged container
+# Expected violation: K8sDenyPrivileged
+apiVersion: v1
+kind: Pod
+metadata:
+  name: privileged-debug-pod
+  labels:
+    app.kubernetes.io/name: debug-pod
+spec:
+  containers:
+  - name: debug
+    image: registry.company.com/tools/debug:latest
+    resources:
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    securityContext:
+      privileged: true      # VIOLATION: privileged containers not allowed
+      runAsUser: 0           # VIOLATION: running as root

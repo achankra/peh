@@ -1,0 +1,272 @@
+# Platform Configuration
+# This file defines the core platform configuration including principles,
+# team structure, golden paths, and policies.
+#
+# This is a sample configuration showing how to structure platform definitions.
+# Customize this for your organization.
+
+platform:
+  name: "Internal Developer Platform"
+  version: "1.0"
+  owner-team: "Platform Engineering"
+  
+  # Platform principles and values
+  principles:
+    - name: "Self-Service"
+      description: "Teams can provision resources and deploy applications without bottlenecks"
+      measurable: "95% of requests fulfilled without platform team intervention"
+    
+    - name: "Guardrails"
+      description: "Safety measures prevent misconfiguration and ensure compliance"
+      measurable: "100% compliance with security and cost policies"
+    
+    - name: "Golden Paths"
+      description: "Clear, recommended patterns for common tasks"
+      measurable: "80% of deployments use golden path"
+    
+    - name: "Extensibility"
+      description: "Platform can be extended with custom integrations"
+      measurable: "Support for custom plugins and extensions"
+    
+    - name: "Observability"
+      description: "Platform health and performance are visible"
+      measurable: "All platform components have metrics and logs"
+    
+    - name: "Security"
+      description: "Security is built-in, not bolted-on"
+      measurable: "Zero-trust architecture, automated compliance checks"
+
+# Team Structure
+teams:
+  platform:
+    name: "Platform Engineering Team"
+    description: "Owns and operates the internal developer platform"
+    members: 8
+    roles:
+      - "Platform Lead"
+      - "Backend Engineer"
+      - "DevOps Engineer"
+      - "Security Engineer"
+      - "Developer Advocate"
+    
+    responsibilities:
+      - "Develop and maintain platform services"
+      - "Define golden paths and standards"
+      - "Operate platform infrastructure"
+      - "Support stream-aligned teams"
+      - "Drive platform adoption"
+    
+    interaction-modes:
+      stream-aligned-teams: "Collaboration and Facilitation"
+      enabling-teams: "Collaboration"
+      other-platform-teams: "Communication"
+  
+  stream-aligned:
+    description: "Teams aligned to business capabilities"
+    examples:
+      - "Payments Team"
+      - "User Management Team"
+      - "Analytics Team"
+    
+    platform-touchpoints:
+      - "Infrastructure provisioning"
+      - "CI/CD pipelines"
+      - "Observability and monitoring"
+      - "Security and compliance"
+      - "Cost management"
+
+# Golden Paths - Recommended patterns and stacks
+golden-paths:
+  microservice:
+    name: "Microservice Deployment"
+    description: "Recommended pattern for deploying microservices"
+    tech-stack:
+      - language: "Go"
+        framework: "Gin or Echo"
+      - runtime: "Docker"
+      - orchestration: "Kubernetes"
+    
+    deployment-process:
+      - "Build Docker image"
+      - "Push to container registry"
+      - "Deploy via Helm chart"
+      - "Configure monitoring"
+    
+    example-repo: "https://github.com/example/microservice-template"
+    documentation: "https://platform.example.com/docs/microservices"
+  
+  web-application:
+    name: "Web Application Deployment"
+    description: "Recommended pattern for web applications"
+    tech-stack:
+      - language: "Node.js or Python"
+      - frontend: "React or Vue"
+      - deployment: "Containerized on K8s"
+    
+    example-repo: "https://github.com/example/web-app-template"
+    documentation: "https://platform.example.com/docs/web-apps"
+
+# Feature Flags - Gradual rollout and experimentation
+feature-flags:
+  enabled: true
+  provider: "LaunchDarkly"
+  
+  features:
+    - key: "new-deployment-ui"
+      description: "New deployment interface for stream-aligned teams"
+      status: "beta"
+      rollout-percentage: 25
+      target-teams:
+        - "Payments Team"
+        - "Analytics Team"
+    
+    - key: "auto-remediation"
+      description: "Automatic remediation of common platform issues"
+      status: "alpha"
+      rollout-percentage: 10
+    
+    - key: "cost-optimization-advisor"
+      description: "AI-powered cost optimization recommendations"
+      status: "beta"
+      rollout-percentage: 50
+
+# Security and Compliance
+security:
+  authentication:
+    method: "OAuth 2.0 + OIDC"
+    provider: "Okta"
+    mfa-required: true
+  
+  authorization:
+    model: "RBAC"
+    roles:
+      - "platform-admin"
+      - "platform-developer"
+      - "team-lead"
+      - "developer"
+  
+  secrets-management:
+    system: "HashiCorp Vault"
+    rotation-period: "90 days"
+    audit: true
+  
+  compliance:
+    standards:
+      - "SOC 2 Type II"
+      - "ISO 27001"
+      - "GDPR"
+    
+    automated-checks: true
+    audit-logging: true
+
+# Infrastructure
+infrastructure:
+  primary-cloud: "AWS"
+  regions:
+    - "us-east-1"
+    - "eu-west-1"
+  
+  kubernetes:
+    version: "1.28"
+    distribution: "EKS"
+    namespaces:
+      - "platform"
+      - "observability"
+      - "security"
+      - "applications"
+  
+  databases:
+    primary: "PostgreSQL"
+    cache: "Redis"
+    message-queue: "Apache Kafka"
+  
+  container-registry: "Amazon ECR"
+
+# Observability
+observability:
+  metrics:
+    system: "Prometheus"
+    retention-days: 30
+    
+    key-metrics:
+      - "platform-availability"
+      - "deployment-frequency"
+      - "deployment-success-rate"
+      - "mean-time-to-recovery"
+  
+  logging:
+    system: "ELK Stack"
+    retention-days: 30
+  
+  tracing:
+    system: "Jaeger"
+    sample-rate: 0.1
+  
+  dashboards:
+    - "Platform Health"
+    - "Deployment Metrics"
+    - "Infrastructure Health"
+    - "Team SLOs"
+
+# API Standards
+api:
+  default-version: "v1"
+  format: "REST + JSON"
+  
+  standards:
+    - "RESTful conventions"
+    - "API versioning required"
+    - "OpenAPI 3.0 documentation"
+    - "Request/response validation"
+    - "Rate limiting"
+    - "API key authentication"
+
+# Policies
+policies:
+  naming-conventions:
+    services: "kebab-case"
+    databases: "snake_case"
+    environments: "lowercase"
+  
+  code-quality:
+    minimum-test-coverage: 80
+    linting-required: true
+    code-review-required: true
+  
+  deployment:
+    automated-testing-required: true
+    security-scanning-required: true
+    production-approval-required: true
+  
+  cost-management:
+    resource-tagging-required: true
+    budget-alerts-enabled: true
+    unused-resource-cleanup: true
+
+# Self-Service Capabilities
+self-service:
+  internal-developer-portal:
+    url: "https://developer.example.com"
+    features:
+      - "Service catalog"
+      - "Provisioning templates"
+      - "Deployment interfaces"
+      - "Documentation hub"
+      - "Cost dashboard"
+  
+  available-templates:
+    - "Kubernetes deployment"
+    - "Lambda function"
+    - "RDS database"
+    - "S3 bucket with bucket policy"
+    - "VPC with subnets"
+  
+  automation-level: "High"
+
+# Contact and Support
+support:
+  primary-channel: "Slack: #platform-support"
+  office-hours: "10-12 AM PT, Monday-Friday"
+  escalation: "platform-oncall@example.com"
+  documentation: "https://platform.example.com/docs"
+  roadmap: "https://github.com/example/platform/projects/1"

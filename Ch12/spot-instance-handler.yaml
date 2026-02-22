@@ -1,0 +1,407 @@
+# Chapter 12: Spot Instance Handler Configuration
+# Demonstrates strategies for using preemptible/spot instances cost-effectively
+# Includes node affinity, pod disruption budgets, and graceful termination
+
+---
+# Namespace for spot instance demos
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spot-instances
+  labels:
+    team: platform-engineering
+
+---
+# Example 1: Deployment with spot instance affinity
+# Uses node affinity to prefer spot nodes but fall back to on-demand
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spot-aware-app
+  namespace: spot-instances
+  labels:
+    app: spot-aware-app
+    team: platform-engineering
+    cost-allocation: spot-optimization
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: spot-aware-app
+  template:
+    metadata:
+      labels:
+        app: spot-aware-app
+        team: platform-engineering
+        cost-allocation: spot-optimization
+    spec:
+      # Affinity configuration for spot instances
+      affinity:
+        # Node affinity: prefer spot nodes
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          # Prefer spot instances
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: cloud.google.com/gke-preemptible  # GKE spot label
+                operator: In
+                values: ["true"]
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: aws.amazon.com/ec2spot  # AWS spot label
+                operator: In
+                values: ["true"]
+          - weight: 50
+            preference:
+              matchExpressions:
+              - key: node.kubernetes.io/instance-type
+                operator: In
+                values: ["t3.medium", "t3.large"]  # Spot-friendly instance types
+        
+        # Pod anti-affinity: spread across nodes to avoid correlated failures
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values: ["spot-aware-app"]
+              topologyKey: kubernetes.io/hostname
+      
+      # Termination grace period for graceful shutdown
+      terminationGracePeriodSeconds: 30
+      
+      containers:
+      - name: app
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        
+        # Lifecycle hooks for graceful termination
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 15 && nginx -s quit"]
+        
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+# Pod Disruption Budget for spot-aware-app
+# Ensures minimum availability during spot evictions
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: spot-aware-app-pdb
+  namespace: spot-instances
+spec:
+  minAvailable: 1  # At least 1 pod must be available
+  selector:
+    matchLabels:
+      app: spot-aware-app
+
+---
+# Example 2: StatefulSet with spot instances
+# Uses separate node pool or on-demand guaranteed for state
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: spot-stateful-app
+  namespace: spot-instances
+  labels:
+    app: spot-stateful-app
+    team: platform-engineering
+spec:
+  serviceName: spot-stateful-app
+  replicas: 3
+  selector:
+    matchLabels:
+      app: spot-stateful-app
+  template:
+    metadata:
+      labels:
+        app: spot-stateful-app
+        team: platform-engineering
+        cost-allocation: spot-optimization
+    spec:
+      affinity:
+        # Require on-demand nodes (no spot for stateful workloads)
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: cloud.google.com/gke-preemptible
+                operator: NotIn
+                values: ["true"]
+              - key: aws.amazon.com/ec2spot
+                operator: NotIn
+                values: ["true"]
+      
+      # Pod anti-affinity to distribute across nodes
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values: ["spot-stateful-app"]
+            topologyKey: kubernetes.io/hostname
+      
+      containers:
+      - name: app
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+---
+# Headless Service for StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: spot-stateful-app
+  namespace: spot-instances
+spec:
+  clusterIP: None
+  selector:
+    app: spot-stateful-app
+  ports:
+  - port: 80
+    targetPort: 80
+
+---
+# Service for spot-aware-app
+apiVersion: v1
+kind: Service
+metadata:
+  name: spot-aware-app
+  namespace: spot-instances
+spec:
+  selector:
+    app: spot-aware-app
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP
+
+---
+# DaemonSet: Spot instance event handler
+# Watches for termination notices and gracefully handles evictions
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: spot-termination-handler
+  namespace: spot-instances
+  labels:
+    app: spot-termination-handler
+spec:
+  selector:
+    matchLabels:
+      app: spot-termination-handler
+  template:
+    metadata:
+      labels:
+        app: spot-termination-handler
+    spec:
+      # Run on all nodes (including spot)
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/os
+                operator: In
+                values: ["linux"]
+      
+      hostNetwork: true
+      hostPID: true
+      
+      # Run with high priority
+      priorityClassName: system-node-critical
+      
+      # Tolerate everything (run on all nodes)
+      tolerations:
+      - operator: Exists
+      
+      containers:
+      - name: handler
+        image: spot-termination-handler:latest
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        volumeMounts:
+        - name: var-run
+          mountPath: /var/run
+      
+      volumes:
+      - name: var-run
+        hostPath:
+          path: /var/run
+
+---
+# Configuration for spot instance cost optimization strategies
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spot-optimization-config
+  namespace: spot-instances
+data:
+  strategies: |
+    # Spot Instance Cost Optimization Strategies
+    
+    ## 1. Mixed Workload Approach
+    - Use spot instances for:
+      * Batch processing jobs
+      * Stateless microservices
+      * CI/CD workloads
+      * Non-critical background tasks
+    - Use on-demand for:
+      * Stateful databases
+      * Critical services
+      * Long-running processes
+    
+    ## 2. Pod Disruption Budgets
+    - Always define PDB for spot workloads
+    - Set minAvailable or maxUnavailable conservatively
+    - Example: 3 replicas = minAvailable: 1
+    
+    ## 3. Graceful Termination
+    - Set terminationGracePeriodSeconds (30-60 seconds)
+    - Implement preStop hooks for cleanup
+    - Handle SIGTERM signals in application
+    
+    ## 4. Node Affinity Strategy
+    - Use preferredDuringScheduling for flexibility
+    - Prefer specific spot-friendly instance types
+    - Spread across availability zones
+    
+    ## 5. Cost Calculation
+    - Typical savings: 60-90% on compute
+    - Trade-off: accept 2-3% eviction rate
+    - Break-even point: pods must survive at least 24 hours
+    
+    ## 6. Monitoring
+    - Track spot eviction rate
+    - Monitor pod restart frequency
+    - Alert if eviction rate > 5%
+    - Log disruption events for analysis
+  
+  instance-types: |
+    # Recommended Spot Instance Types by Cloud Provider
+    
+    ## AWS EC2 Spot
+    - t3.medium, t3.large: General purpose, burstable
+    - m5.large, m5.xlarge: General purpose, balanced
+    - c5.large, c5.xlarge: Compute optimized
+    - Recommended: Use Spot Fleet with diverse types
+    
+    ## Google Cloud Preemptible
+    - n1-standard-1, n1-standard-2: General purpose
+    - n2-standard-2, n2-standard-4: Newer generation
+    - e2-medium, e2-standard-2: Cost optimized
+    - Label: cloud.google.com/gke-preemptible=true
+    
+    ## Azure Spot
+    - Standard_B1s, Standard_B2s: Burstable
+    - Standard_D2s_v3, Standard_D4s_v3: General purpose
+    - Standard_F2s_v2, Standard_F4s_v2: Compute optimized
+    - Label: kubernetes.azure.com/spot-vm=true
+
+---
+# Example: CronJob using spot instances for batch processing
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: batch-processor-spot
+  namespace: spot-instances
+spec:
+  schedule: "0 2 * * *"  # Run at 2 AM daily
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: batch-processor
+            cost-allocation: batch-jobs
+        spec:
+          # Prefer spot instances for batch jobs
+          affinity:
+            nodeAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                preference:
+                  matchExpressions:
+                  - key: cloud.google.com/gke-preemptible
+                    operator: In
+                    values: ["true"]
+          
+          restartPolicy: OnFailure
+          terminationGracePeriodSeconds: 60
+          
+          containers:
+          - name: processor
+            image: batch-processor:latest
+            resources:
+              requests:
+                cpu: 500m
+                memory: 512Mi
+              limits:
+                cpu: 1000m
+                memory: 1Gi
+            env:
+            - name: JOB_TIMEOUT
+              value: "3600"
+
+---
+# Priority Classes for managing spot vs on-demand
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: critical-on-demand
+value: 1000
+globalDefault: false
+description: "Critical workloads requiring on-demand nodes"
+
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: best-effort-spot
+value: 100
+globalDefault: false
+description: "Best-effort workloads suitable for spot instances"

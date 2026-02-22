@@ -1,0 +1,218 @@
+# Multi-Environment Kubernetes Cluster Configuration
+# This YAML demonstrates how production and non-production clusters differ
+# in terms of node counts, instance types, autoscaling, and monitoring settings
+
+---
+# Production Environment Cluster
+production:
+  cluster_name: "platform-prod-cluster"
+  region: "us-east-1"
+  kubernetes_version: "1.28.5"
+  
+  # Node Pool Configuration
+  node_pools:
+    - name: "system-pool"
+      node_count: 3
+      min_nodes: 3
+      max_nodes: 5
+      instance_type: "t3.xlarge"  # 4 vCPU, 16 GiB RAM
+      disk_size_gb: 100
+      labels:
+        workload_type: "system"
+      taints:
+        - key: "system-pool"
+          value: "true"
+          effect: "NoSchedule"
+    
+    - name: "app-pool"
+      node_count: 10
+      min_nodes: 10
+      max_nodes: 50
+      instance_type: "t3.2xlarge"  # 8 vCPU, 32 GiB RAM
+      disk_size_gb: 200
+      labels:
+        workload_type: "application"
+      taints: []
+    
+    - name: "batch-pool"
+      node_count: 5
+      min_nodes: 2
+      max_nodes: 20
+      instance_type: "m6i.xlarge"  # 4 vCPU, 16 GiB RAM (compute optimized)
+      disk_size_gb: 150
+      labels:
+        workload_type: "batch"
+      taints:
+        - key: "batch-pool"
+          value: "true"
+          effect: "NoSchedule"
+  
+  # Autoscaling Configuration
+  autoscaling:
+    enabled: true
+    scale_down_enabled: true
+    scale_down_delay_after_add: 10m
+    scale_down_delay_after_failure: 3m
+    scale_down_delay_after_delete: 10s
+    scale_down_unready_time: 20m
+    max_node_provision_time: 15m
+  
+  # Monitoring and Logging
+  monitoring:
+    enabled: true
+    monitoring_interval: 15s
+    metrics_retention: 30d
+    log_retention: 90d
+    alerting_enabled: true
+    alert_channels:
+      - name: "slack-critical"
+        type: "slack"
+        severity: "critical"
+      - name: "pagerduty"
+        type: "pagerduty"
+        severity: "critical"
+  
+  # Network Configuration
+  networking:
+    pod_cidr: "10.0.0.0/14"
+    service_cidr: "10.4.0.0/20"
+    dns_provider: "coredns"
+    network_policy_enabled: true
+    encryption_enabled: true
+  
+  # Security
+  security:
+    rbac_enabled: true
+    pod_security_policy_enabled: true
+    seccomp_enabled: true
+    admission_controllers:
+      - PodSecurityPolicy
+      - ResourceQuota
+      - LimitRanger
+      - ServiceAccount
+  
+  # Backup Configuration
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2 AM UTC
+    retention_days: 30
+    backup_location: "s3://platform-backups-prod"
+
+---
+# Non-Production Environment Cluster
+nonproduction:
+  cluster_name: "platform-nonprod-cluster"
+  region: "us-east-1"
+  kubernetes_version: "1.28.5"
+  
+  # Node Pool Configuration (Minimal for dev/staging)
+  node_pools:
+    - name: "system-pool"
+      node_count: 2
+      min_nodes: 2
+      max_nodes: 3
+      instance_type: "t3.large"  # 2 vCPU, 8 GiB RAM
+      disk_size_gb: 50
+      labels:
+        workload_type: "system"
+      taints:
+        - key: "system-pool"
+          value: "true"
+          effect: "NoSchedule"
+    
+    - name: "app-pool"
+      node_count: 3
+      min_nodes: 3
+      max_nodes: 10
+      instance_type: "t3.xlarge"  # 4 vCPU, 16 GiB RAM
+      disk_size_gb: 100
+      labels:
+        workload_type: "application"
+      taints: []
+    
+    - name: "batch-pool"
+      node_count: 1
+      min_nodes: 1
+      max_nodes: 5
+      instance_type: "t3.large"  # 2 vCPU, 8 GiB RAM
+      disk_size_gb: 50
+      labels:
+        workload_type: "batch"
+      taints:
+        - key: "batch-pool"
+          value: "true"
+          effect: "NoSchedule"
+  
+  # Autoscaling Configuration (Less aggressive)
+  autoscaling:
+    enabled: true
+    scale_down_enabled: true
+    scale_down_delay_after_add: 5m
+    scale_down_delay_after_failure: 2m
+    scale_down_delay_after_delete: 5s
+    scale_down_unready_time: 10m
+    max_node_provision_time: 10m
+  
+  # Monitoring and Logging (Reduced retention)
+  monitoring:
+    enabled: true
+    monitoring_interval: 60s  # Less frequent sampling
+    metrics_retention: 7d  # Shorter retention
+    log_retention: 30d
+    alerting_enabled: true
+    alert_channels:
+      - name: "slack-dev"
+        type: "slack"
+        severity: "critical"
+  
+  # Network Configuration
+  networking:
+    pod_cidr: "10.8.0.0/14"
+    service_cidr: "10.12.0.0/20"
+    dns_provider: "coredns"
+    network_policy_enabled: true
+    encryption_enabled: false  # Not required for dev/staging
+  
+  # Security
+  security:
+    rbac_enabled: true
+    pod_security_policy_enabled: false  # Relaxed for dev
+    seccomp_enabled: false
+    admission_controllers:
+      - ServiceAccount
+      - ResourceQuota
+      - LimitRanger
+  
+  # Backup Configuration
+  backup:
+    enabled: true
+    schedule: "0 4 * * 0"  # Weekly on Sundays at 4 AM UTC
+    retention_days: 7
+    backup_location: "s3://platform-backups-nonprod"
+
+---
+# Key Differences Summary
+differences:
+  node_counts:
+    production: "18 nodes (3+10+5)"
+    nonproduction: "6 nodes (2+3+1)"
+  
+  instance_sizes:
+    production: "Mixed t3.xlarge/2xlarge + m6i.xlarge"
+    nonproduction: "Uniform t3.large/xlarge"
+  
+  autoscaling_aggressiveness:
+    production: "Conservative (10m delay after add)"
+    nonproduction: "Aggressive (5m delay after add)"
+  
+  metrics_retention:
+    production: "30 days"
+    nonproduction: "7 days"
+  
+  security_posture:
+    production: "Strict (PSP + seccomp + encryption)"
+    nonproduction: "Relaxed for development velocity"
+  
+  backup_strategy:
+    production: "Daily with 30-day retention"
+    nonproduction: "Weekly with 7-day retention"

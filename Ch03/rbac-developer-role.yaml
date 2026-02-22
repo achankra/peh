@@ -1,0 +1,215 @@
+################################################################################
+# RBAC Configuration for Platform Developers
+#
+# Purpose: Define Role and RoleBinding for developers with limited permissions
+# Principle: Developers can manage deployments, services, and pods in their
+#           namespace but cannot access cluster-wide resources
+#
+# Usage: kubectl apply -f rbac-developer-role.yaml
+################################################################################
+
+---
+# Namespace for developer access
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  labels:
+    name: dev
+    environment: development
+
+---
+# Role: developer-role
+# Allows developers to manage standard resources in their namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: developer-role
+  namespace: dev
+  labels:
+    app: platform-engineering
+    component: rbac
+rules:
+  # Permissions for viewing and managing deployments
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  
+  # Permissions for viewing deployment rollouts
+  - apiGroups: ["apps"]
+    resources: ["deployments/rollback"]
+    verbs: ["create"]
+  
+  # Permissions for managing pods (view, logs, exec)
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/exec"]
+    verbs: ["get", "list", "watch"]
+  
+  # Permissions for managing services
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  
+  # Permissions for managing configmaps
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Permissions for viewing secrets (read-only)
+  # NOTE: Developers can view but not create secrets
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  
+  # Permissions for managing ingresses
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  
+  # Permissions for managing persistent volumes within namespace
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  
+  # Permissions for viewing endpoints
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list", "watch"]
+  
+  # Permissions for viewing events
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  
+  # Permissions for metrics (if metrics-server is installed)
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+  
+  # EXPLICITLY DENIED (commented out - using absence instead)
+  # Developers CANNOT:
+  #   - Create or delete namespaces
+  #   - Create or modify RBAC resources (roles, bindings)
+  #   - Access cluster-level resources
+  #   - Delete persistent volumes
+  #   - Create service accounts with escalated privileges
+
+---
+# RoleBinding: developer-binding
+# Binds the developer-role to developers in the dev namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: developer-binding
+  namespace: dev
+  labels:
+    app: platform-engineering
+    component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: developer-role
+subjects:
+  # Replace with actual user/group from your identity provider
+  - kind: Group
+    name: "developers@company.example.com"
+    apiGroup: rbac.authorization.k8s.io
+  
+  # Service account example (commented, uncomment to use)
+  # - kind: ServiceAccount
+  #   name: developer-user
+  #   namespace: dev
+
+---
+# Role: developer-readonly-role
+# For developers who need read-only access to view resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: developer-readonly-role
+  namespace: dev
+  labels:
+    app: platform-engineering
+    component: rbac
+rules:
+  # Read-only access to all standard resources
+  - apiGroups: ["", "apps", "batch", "networking.k8s.io", "metrics.k8s.io"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+
+---
+# RoleBinding: developer-readonly-binding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: developer-readonly-binding
+  namespace: dev
+  labels:
+    app: platform-engineering
+    component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: developer-readonly-role
+subjects:
+  # Replace with actual user/group - stakeholders with viewing access
+  - kind: Group
+    name: "stakeholders@company.example.com"
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# ServiceAccount: developer-user (example for automation)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: developer-user
+  namespace: dev
+  labels:
+    app: platform-engineering
+    component: rbac
+
+---
+# RoleBinding: developer-sa-binding
+# Bind service account to developer role (for CI/CD or automation)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: developer-sa-binding
+  namespace: dev
+  labels:
+    app: platform-engineering
+    component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: developer-role
+subjects:
+  - kind: ServiceAccount
+    name: developer-user
+    namespace: dev
+
+################################################################################
+# RBAC Permissions Summary
+#
+# ALLOWED (for developer-role):
+#   - Create/Update/View Deployments, StatefulSets, DaemonSets
+#   - View and exec into Pods
+#   - Manage Services and Ingresses
+#   - Create and edit ConfigMaps
+#   - View (but not create) Secrets
+#   - Manage PersistentVolumeClaims
+#   - View Events and Metrics
+#
+# DENIED (via absence):
+#   - Create/Delete Namespaces
+#   - Create/Modify RBAC resources
+#   - Delete Pods (forceful termination)
+#   - Access Persistent Volumes directly
+#   - Create privileged containers
+#
+# Usage Notes:
+#   1. Update the 'subjects' section with your actual users/groups
+#   2. Adjust resource permissions based on your organization's needs
+#   3. Consider using namespace quotas and network policies alongside RBAC
+#   4. Regularly audit and review role permissions
+################################################################################

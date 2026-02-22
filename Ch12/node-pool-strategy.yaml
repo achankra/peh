@@ -1,0 +1,156 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-pool-strategy
+  namespace: default
+data:
+  description: "Node pool configuration for on-demand and spot instances"
+
+---
+# On-demand pool for critical workloads
+apiVersion: v1
+kind: Taint
+metadata:
+  name: workload-type-critical
+data:
+  key: workload-type
+  value: critical
+  effect: NoSchedule
+  description: "Critical workload taint - on-demand instances only"
+
+---
+# Spot instance pool for batch workloads
+apiVersion: v1
+kind: Taint
+metadata:
+  name: workload-type-batch
+data:
+  key: workload-type
+  value: batch
+  effect: PreferNoSchedule
+  description: "Batch workload taint - prefers spot instances"
+
+---
+# Example node pool specification for on-demand critical workloads
+# This would be implemented as a GKE NodePool, EKS NodeGroup, or AKS AgentPool
+apiVersion: compute.cnpg.io/v1beta1
+kind: NodePool
+metadata:
+  name: on-demand-critical
+  namespace: default
+spec:
+  nodeTemplate:
+    spec:
+      # Taint for critical workloads
+      taints:
+        - key: workload-type
+          value: critical
+          effect: NoSchedule
+      
+      # On-demand instance types for reliability
+      instanceTypes:
+        - m5.xlarge
+        - m5.2xlarge
+      
+      # Machine type configuration
+      machineType: m5.xlarge
+      diskSizeGb: 100
+      preemptible: false
+  
+  # Node pool scaling
+  autoscaling:
+    minNodeCount: 2
+    maxNodeCount: 10
+    targetCpuUtilization: 70
+  
+  # Additional labels for identification
+  labels:
+    pool-type: on-demand
+    workload-type: critical
+    cost-optimization: false
+
+---
+# Spot instance pool for batch workloads
+apiVersion: compute.cnpg.io/v1beta1
+kind: NodePool
+metadata:
+  name: spot-batch
+  namespace: default
+spec:
+  nodeTemplate:
+    spec:
+      # Taint for batch workloads (softer preference)
+      taints:
+        - key: workload-type
+          value: batch
+          effect: PreferNoSchedule
+      
+      # Spot instance types for cost optimization
+      instanceTypes:
+        - m5.large
+        - m5.xlarge
+      
+      # Machine type configuration
+      machineType: m5.large
+      diskSizeGb: 80
+      preemptible: true
+  
+  # Node pool scaling
+  autoscaling:
+    minNodeCount: 0
+    maxNodeCount: 20
+    targetCpuUtilization: 80
+  
+  # Additional labels for identification
+  labels:
+    pool-type: spot
+    workload-type: batch
+    cost-optimization: true
+
+---
+# Example toleration for critical workloads
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: critical-pod-template
+data:
+  spec:
+    tolerations:
+      - key: workload-type
+        operator: Equal
+        value: critical
+        effect: NoSchedule
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: pool-type
+                  operator: In
+                  values:
+                    - on-demand
+
+---
+# Example toleration for batch workloads
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: batch-pod-template
+data:
+  spec:
+    tolerations:
+      - key: workload-type
+        operator: Equal
+        value: batch
+        effect: PreferNoSchedule
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 50
+            preference:
+              matchExpressions:
+                - key: pool-type
+                  operator: In
+                  values:
+                    - spot

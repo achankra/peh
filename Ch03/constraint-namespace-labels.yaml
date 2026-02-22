@@ -1,0 +1,45 @@
+# Chapter 3 - Securing Platform Access
+# OPA Gatekeeper Constraint: Require Namespace Labels
+#
+# This Constraint enforces that all namespaces have required labels
+# for team ownership, cost allocation, and compliance tracking.
+# It references the built-in K8sRequiredLabels ConstraintTemplate.
+#
+# Usage:
+#   1. Ensure Gatekeeper is installed with the K8sRequiredLabels template
+#   2. Apply this constraint: kubectl apply -f constraint-namespace-labels.yaml
+#   3. Any namespace without required labels will be rejected
+#
+# Required labels:
+#   - team: identifies the owning team
+#   - cost-center: for FinOps cost allocation
+#   - environment: dev/staging/production classification
+
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLabels
+metadata:
+  name: require-namespace-labels
+  annotations:
+    description: "Enforces required labels on all namespaces for governance"
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Namespace"]
+    # Exclude system namespaces from this policy
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - gatekeeper-system
+      - default
+  parameters:
+    labels:
+      - key: "team"
+        # Optional: restrict to allowed values
+        # allowedRegex: "^(platform|backend|frontend|data|sre)$"
+      - key: "cost-center"
+        allowedRegex: "^[A-Z]{2}-[0-9]{4}$"
+      - key: "environment"
+        allowedRegex: "^(dev|staging|production)$"

@@ -1,0 +1,524 @@
+openapi: 3.0.0
+info:
+  title: Self-Service Platform Onboarding API
+  version: 1.0.0
+  description: |
+    REST API for self-service platform onboarding, enabling teams to
+    provision namespaces, manage members, and set up infrastructure
+    without direct platform admin intervention.
+  contact:
+    name: Platform Engineering Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:5000
+    description: Development server
+  - url: https://api.platform.internal
+    description: Production server
+
+paths:
+  /teams:
+    post:
+      summary: Create a new team
+      description: |
+        Creates a new team with namespace provisioning, resource quotas,
+        and RBAC setup. This operation is idempotent - creating a team
+        that already exists returns success.
+      operationId: createTeam
+      tags:
+        - Teams
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamCreateRequest'
+      responses:
+        '201':
+          description: Team created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+        '400':
+          description: Invalid request payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Team already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      summary: List all teams
+      description: |
+        Retrieves a list of all teams with their metadata and current status.
+        Results can be filtered and paginated.
+      operationId: listTeams
+      tags:
+        - Teams
+      parameters:
+        - name: offset
+          in: query
+          description: Number of teams to skip
+          schema:
+            type: integer
+            default: 0
+        - name: limit
+          in: query
+          description: Maximum number of teams to return
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: List of teams
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamList'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /teams/{teamId}:
+    get:
+      summary: Get team details
+      description: |
+        Retrieves detailed information about a specific team, including
+        members, resource usage, and configuration.
+      operationId: getTeam
+      tags:
+        - Teams
+      parameters:
+        - name: teamId
+          in: path
+          required: true
+          description: Team identifier
+          schema:
+            type: string
+            pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+            minLength: 3
+            maxLength: 63
+      responses:
+        '200':
+          description: Team details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+        '404':
+          description: Team not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Delete a team
+      description: |
+        Deletes a team and its associated namespace. This operation is
+        irreversible and will cascade delete all team resources.
+      operationId: deleteTeam
+      tags:
+        - Teams
+      parameters:
+        - name: teamId
+          in: path
+          required: true
+          description: Team identifier
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Team deleted successfully
+        '404':
+          description: Team not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /teams/{teamId}/members:
+    post:
+      summary: Add member to team
+      description: |
+        Adds a new member to a team and assigns the specified role.
+        The member will gain RBAC access to the team namespace.
+      operationId: addTeamMember
+      tags:
+        - Members
+      parameters:
+        - name: teamId
+          in: path
+          required: true
+          description: Team identifier
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberCreateRequest'
+      responses:
+        '201':
+          description: Member added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+        '400':
+          description: Invalid request payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Team not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Member already exists in team
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      summary: List team members
+      description: |
+        Retrieves all members of a team with their roles and permissions.
+      operationId: listTeamMembers
+      tags:
+        - Members
+      parameters:
+        - name: teamId
+          in: path
+          required: true
+          description: Team identifier
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of team members
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberList'
+        '404':
+          description: Team not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /teams/{teamId}/members/{memberId}:
+    delete:
+      summary: Remove member from team
+      description: |
+        Removes a member from a team, revoking their RBAC access.
+      operationId: removeTeamMember
+      tags:
+        - Members
+      parameters:
+        - name: teamId
+          in: path
+          required: true
+          description: Team identifier
+          schema:
+            type: string
+        - name: memberId
+          in: path
+          required: true
+          description: Member email or identifier
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Member removed successfully
+        '404':
+          description: Team or member not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    Team:
+      type: object
+      required:
+        - id
+        - name
+        - display_name
+        - lead
+        - created_at
+        - namespace
+        - status
+      properties:
+        id:
+          type: string
+          description: Team identifier
+          example: platform-team
+        name:
+          type: string
+          description: Team name (slug format)
+          example: platform-team
+        display_name:
+          type: string
+          description: Human-readable team name
+          example: Platform Engineering Team
+        lead:
+          type: string
+          format: email
+          description: Email of the team lead
+          example: alice@example.com
+        description:
+          type: string
+          description: Team description
+          example: Responsible for platform infrastructure
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp when team was created
+          example: '2024-01-15T10:30:00Z'
+        namespace:
+          type: object
+          description: Kubernetes namespace information
+          properties:
+            name:
+              type: string
+              example: team-platform-team
+            status:
+              type: string
+              enum: [pending, active, failed]
+              example: active
+            resource_quota:
+              type: object
+              description: Resource quota limits
+              properties:
+                cpu:
+                  type: string
+                  example: '10'
+                memory:
+                  type: string
+                  example: '50Gi'
+                pods:
+                  type: integer
+                  example: 100
+        status:
+          type: string
+          enum: [creating, active, suspended, deleting]
+          description: Current team status
+          example: active
+        member_count:
+          type: integer
+          description: Number of team members
+          example: 5
+
+    TeamCreateRequest:
+      type: object
+      required:
+        - name
+        - display_name
+        - lead
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+          minLength: 3
+          maxLength: 63
+          description: Team identifier in slug format
+          example: platform-team
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Human-readable team name
+          example: Platform Engineering Team
+        lead:
+          type: string
+          format: email
+          description: Email of the team lead
+          example: alice@example.com
+        description:
+          type: string
+          description: Optional team description
+          example: Platform infrastructure and tooling
+        resource_quota:
+          type: object
+          description: Optional custom resource quotas
+          properties:
+            cpu:
+              type: string
+              example: '20'
+            memory:
+              type: string
+              example: '100Gi'
+            pods:
+              type: integer
+              example: 200
+
+    TeamList:
+      type: object
+      required:
+        - teams
+        - total
+        - offset
+        - limit
+      properties:
+        teams:
+          type: array
+          items:
+            $ref: '#/components/schemas/Team'
+        total:
+          type: integer
+          description: Total number of teams
+          example: 42
+        offset:
+          type: integer
+          description: Number of teams skipped
+          example: 0
+        limit:
+          type: integer
+          description: Maximum teams returned
+          example: 20
+
+    Member:
+      type: object
+      required:
+        - email
+        - role
+        - joined_at
+      properties:
+        email:
+          type: string
+          format: email
+          description: Member email address
+          example: bob@example.com
+        name:
+          type: string
+          description: Member full name
+          example: Bob Smith
+        role:
+          type: string
+          enum: [lead, developer, viewer]
+          description: Member role in the team
+          example: developer
+        joined_at:
+          type: string
+          format: date-time
+          description: When member joined the team
+          example: '2024-01-20T14:25:00Z'
+        permissions:
+          type: array
+          description: Additional permissions granted to member
+          items:
+            type: string
+          example: ['create-projects', 'manage-ci']
+
+    MemberCreateRequest:
+      type: object
+      required:
+        - email
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+          description: Member email address
+          example: bob@example.com
+        name:
+          type: string
+          description: Member full name
+          example: Bob Smith
+        role:
+          type: string
+          enum: [lead, developer, viewer]
+          description: Member role in the team
+          example: developer
+
+    MemberList:
+      type: object
+      required:
+        - members
+        - total
+      properties:
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/Member'
+        total:
+          type: integer
+          description: Number of members in team
+          example: 5
+
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Error code for programmatic handling
+          example: TEAM_NOT_FOUND
+        message:
+          type: string
+          description: Human-readable error message
+          example: Team 'unknown-team' does not exist
+        details:
+          type: object
+          description: Additional error details
+          additionalProperties: true
+          example:
+            team_id: unknown-team
+            timestamp: '2024-01-15T10:30:00Z'

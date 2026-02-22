@@ -1,0 +1,17 @@
+# Chapter 11: Constraint for Required Resources
+# Listing 11.2 - Applying the K8sRequiredResources policy
+# This constraint enforces resource requests and limits on all containers
+# except those in system namespaces.
+
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredResources
+metadata:
+  name: require-resources
+spec:
+  match:
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - gatekeeper-system
+  parameters:
+    message: "All containers must have resource requests and limits"

@@ -1,0 +1,88 @@
+# Chapter 12 - Optimizing Cost, Performance, and Scalability
+# OpenCost Cost Allocation Configuration
+#
+# OpenCost uses Kubernetes labels to attribute costs to teams,
+# cost centers, and environments. This ConfigMap defines the
+# label-based allocation strategy.
+#
+# Prerequisites:
+#   - OpenCost installed (see install-opencost.sh)
+#   - Namespaces labeled with team, cost-center, environment
+#
+# Usage:
+#   kubectl apply -f opencost-cost-allocation.yaml
+#
+# Reference:
+#   - https://www.opencost.io/docs/configuration
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opencost-allocation-config
+  namespace: opencost
+data:
+  allocation.yaml: |
+    # OpenCost Cost Allocation Configuration
+    # Enables team-based cost reporting with custom labels
+
+    # Custom label mappings for cost allocation
+    custom_labels:
+      - name: team
+        key: team
+        description: "Team responsible for the workload"
+
+      - name: cost-center
+        key: cost-center
+        description: "Cost center for billing allocation"
+
+      - name: environment
+        key: environment
+        values:
+          - production
+          - staging
+          - development
+        description: "Deployment environment"
+
+    # Aggregation configuration
+    aggregation:
+      # Aggregate costs by namespace
+      - dimension: namespace
+        label: "Namespace"
+
+      # Aggregate costs by team label
+      - dimension: label:team
+        label: "Team"
+
+      # Aggregate costs by cost-center
+      - dimension: label:cost-center
+        label: "Cost Center"
+
+      # Aggregate costs by environment
+      - dimension: label:environment
+        label: "Environment"
+
+    # Cost allocation rules
+    allocation_rules:
+      # Shared costs (platform services, monitoring, etc.)
+      shared_resources:
+        - namespace: monitoring
+          distribution: proportional
+        - namespace: opencost
+          distribution: proportional
+        - namespace: istio-system
+          distribution: proportional
+
+      # Idle resources allocation
+      idle_resources:
+        distribution: proportional
+        target: label:cost-center
+
+    # Filters for allocation
+    filters:
+      exclude_namespaces:
+        - kube-system
+        - kube-public
+        - kube-node-lease
+        - opencost
+      exclude_labels:
+        - "temporary=true"

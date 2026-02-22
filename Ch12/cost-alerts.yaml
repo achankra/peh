@@ -1,0 +1,71 @@
+# Chapter 12: Cost Anomaly Detection with Prometheus Rules
+# Listing 12.8 - Prometheus alerting rules for cost anomalies
+# Detects unusual cost spikes by comparing current rates against 7-day baselines.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cost-anomalies
+  namespace: monitoring
+spec:
+  groups:
+    - name: cost-anomalies
+      interval: 5m
+      rules:
+        # Primary cost anomaly detection (from manuscript)
+        - alert: CostAnomalyDetected
+          expr: |
+            abs(
+              rate(container_cost_total[1h]) -
+              avg_over_time(rate(container_cost_total[1h])[7d])
+            )
+            >
+            0.5 * avg_over_time(rate(container_cost_total[1h])[7d])
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cost anomaly detected"
+            description: >
+              Namespace {{ $labels.namespace }} cost has deviated
+              by more than 50% from baseline
+
+        # Alert for oversized pod resource requests
+        - alert: OversizedPods
+          expr: |
+            (kube_pod_container_resource_requests{resource="cpu"} / (rate(container_cpu_usage_seconds_total[5m]) + 0.001)) > 3
+          for: 15m
+          labels:
+            severity: info
+            category: resource-optimization
+          annotations:
+            summary: "Pod has oversized resource requests compared to actual usage"
+            description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has request/usage ratio of {{ $value }}x (threshold: 3x)"
+
+        # Alert for low node utilization
+        - alert: LowNodeUtilization
+          expr: |
+            (1 - rate(node_cpu_seconds_total{mode="idle"}[5m])) < 0.2
+          for: 30m
+          labels:
+            severity: info
+            category: efficiency
+          annotations:
+            summary: "Node has low CPU utilization"
+            description: "Node {{ $labels.node }} utilization is very low - consider consolidating workloads"
+
+        # Namespace-level cost anomaly
+        - alert: NamespaceCostAnomaly
+          expr: |
+            abs(
+              sum by (namespace) (rate(container_cpu_usage_seconds_total[1h])) -
+              avg_over_time(sum by (namespace) (rate(container_cpu_usage_seconds_total[1h]))[7d])
+            )
+            > 2 * stddev_over_time(sum by (namespace) (rate(container_cpu_usage_seconds_total[1h]))[7d])
+          for: 5m
+          labels:
+            severity: warning
+            category: cost-anomaly
+          annotations:
+            summary: "Namespace cost anomaly detected"
+            description: "Namespace {{ $labels.namespace }} resource usage deviates significantly from 7-day average"

@@ -1,0 +1,19 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLabels
+metadata:
+  name: require-compliance-labels
+spec:
+  match:
+    kinds:
+      - apiGroups: ["apps"]
+        kinds: ["Deployment"]
+    excludedNamespaces:
+      - gatekeeper-system
+      - kube-system
+      - kube-public
+  parameters:
+    labels:
+      - team
+      - cost-center
+      - compliance-level
+    exemptImages: []

@@ -1,0 +1,148 @@
+# Chapter 11: Pre-commit Hook Configuration
+# ==========================================
+# Runs conftest policy validation on YAML files before git commits
+# Enables shift-left policy enforcement at development time
+#
+# Installation:
+#   1. Install pre-commit framework:
+#      pip install pre-commit
+#
+#   2. Install the git hook scripts in this directory:
+#      pre-commit install
+#
+#   3. Optionally run against all files:
+#      pre-commit run --all-files
+#
+# Usage:
+#   - Commits are automatically blocked if conftest finds violations
+#   - To bypass (not recommended): git commit --no-verify
+#   - To run manually: pre-commit run conftest
+#
+# Documentation:
+#   - https://pre-commit.com/
+#   - https://www.conftest.dev/
+
+repos:
+  # YAML Syntax Validation
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-yaml
+        name: Check YAML syntax
+        args:
+          - --unsafe  # Allow YAML constructs like !ruby/object
+        files: |
+          (?x)^(
+            .*\.yaml|
+            .*\.yml|
+            kustomization\.yaml
+          )$
+        exclude: |
+          (?x)(
+            \.venv/|
+            venv/|
+            __pycache__/
+          )
+
+  # Conftest Policy Validation
+  - repo: https://github.com/instrumenta/conftest
+    rev: v0.52.0
+    hooks:
+      - id: conftest
+        name: Validate policies with conftest
+        description: Runs conftest on Kubernetes manifests
+        entry: conftest test
+        language: system
+        files: |
+          (?x)^(
+            .*\.yaml|
+            .*\.yml
+          )$
+        exclude: |
+          (?x)(
+            ^\.github/|
+            __pycache__/|
+            \.venv/|
+            venv/
+          )
+        args:
+          # Point to policy directories
+          - --policy=policies/
+          - --policy=conftest-tests/
+          # Only test specific files that changed
+          - --namespace=main
+        # Run on changed files in staging area
+        stages: [commit]
+        # Don't fail if conftest not installed (dev might not need it)
+        fail_fast: false
+
+  # Optional: Static analysis tools
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.13.0
+    hooks:
+      - id: hadolint-docker
+        name: Lint Dockerfiles
+        files: Dockerfile
+
+  # Optional: Shell script linting
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
+    hooks:
+      - id: shellcheck
+        name: Lint shell scripts
+        args: [--severity=warning]
+        exclude: |
+          (?x)(
+            \.venv/|
+            venv/
+          )
+
+  # Optional: Trailing whitespace and end-of-file fixes
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        name: Trim trailing whitespace
+        args: [--markdown-args=--ignore-code-blocks]
+      - id: end-of-file-fixer
+        name: Fix end of file
+      - id: mixed-line-ending
+        name: Fix mixed line endings
+        args: [--fix=lf]
+
+  # Optional: JSON validation
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: pretty-print-json
+        name: Validate and format JSON
+        args: [--indent=2, --autofix]
+
+# Global exclusions
+exclude: |
+  (?x)(
+    \.venv/|
+    venv/|
+    __pycache__/|
+    \.git/|
+    node_modules/|
+    build/|
+    dist/
+  )
+
+# Fail-fast mode: stop on first failure
+fail_fast: false
+
+# Minimum pre-commit version
+minimum_pre_commit_version: '2.15.0'
+
+# Notes:
+# ======
+# 1. This config validates all YAML files in the commit
+# 2. Conftest policies must be in ./policies/ or ./conftest-tests/
+# 3. To skip validation for a commit: git commit --no-verify
+#    (Use sparingly - defeats the purpose of pre-commit!)
+# 4. Install all prerequisites: pip install pre-commit conftest
+# 5. To debug hook failures:
+#    - Run manually: pre-commit run conftest --all-files --verbose
+#    - Check logs: cat .git/hooks/pre-commit

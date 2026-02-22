@@ -1,0 +1,495 @@
+# Platform Services Kustomization
+# 
+# This Kustomization defines cluster-wide platform services managed by Flux.
+# It includes Istio service mesh, TLS certificate management, monitoring stack,
+# and OPA/Gatekeeper policy enforcement.
+#
+# Structure:
+# - Resources are organized by function
+# - Each service has its own namespace
+# - Common patterns (labels, annotations) are applied via Kustomize
+# - Flux GitOps controller reconciles this configuration
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+metadata:
+  name: platform-services
+  namespace: flux-system
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/managed-by: flux
+  platform: scalable-runtime
+
+# Common annotations
+commonAnnotations:
+  kustomize.toolkit.fluxcd.io/version: "4.0"
+
+# Resources managed by this Kustomization
+resources:
+  # Istio service mesh
+  - istio-system.yaml
+  # TLS certificate management
+  - cert-manager.yaml
+  # Monitoring stack (Prometheus, Grafana, Alertmanager)
+  - monitoring.yaml
+  # OPA/Gatekeeper policy engine
+  - opa-gatekeeper.yaml
+  # Network policies
+  - network-policies.yaml
+
+---
+# Istio System Namespace and Components
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: istio-system
+  labels:
+    istio-injection: disabled
+
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: istio-base
+  namespace: flux-system
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: base
+      sourceRef:
+        kind: HelmRepository
+        name: istio
+        namespace: flux-system
+      version: '>=1.17.0'
+  install:
+    crds: Create
+  upgrade:
+    crds: CreateReplace
+
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: istiod
+  namespace: flux-system
+spec:
+  interval: 5m
+  dependsOn:
+    - name: istio-base
+  chart:
+    spec:
+      chart: istiod
+      sourceRef:
+        kind: HelmRepository
+        name: istio
+        namespace: flux-system
+      version: '>=1.17.0'
+  values:
+    namespace: istio-system
+    global:
+      istioNamespace: istio-system
+    pilot:
+      autoscaleEnabled: true
+      autoscaleMin: 2
+      autoscaleMax: 5
+      resources:
+        requests:
+          cpu: 500m
+          memory: 2048Mi
+      env:
+        PILOT_ENABLE_ALPHA_GATEWAY_API: "true"
+
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: istio-ingress
+  namespace: flux-system
+spec:
+  interval: 5m
+  dependsOn:
+    - name: istiod
+  chart:
+    spec:
+      chart: gateway
+      sourceRef:
+        kind: HelmRepository
+        name: istio
+        namespace: flux-system
+      version: '>=1.17.0'
+  values:
+    name: ingress-gateway
+    namespace: istio-system
+    replicaCount: 2
+    service:
+      type: LoadBalancer
+      ports:
+        - port: 80
+          name: http
+        - port: 443
+          name: https
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 2000m
+        memory: 1024Mi
+
+---
+# Cert-Manager for TLS/SSL Certificates
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: cert-manager
+  namespace: flux-system
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: cert-manager
+      sourceRef:
+        kind: HelmRepository
+        name: jetstack
+        namespace: flux-system
+      version: 'v1.13.0'
+  install:
+    crds: Create
+  upgrade:
+    crds: CreateReplace
+  values:
+    namespace: cert-manager
+    serviceAccount:
+      create: true
+    resources:
+      limits:
+        cpu: 100m
+        memory: 128Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    webhook:
+      resources:
+        limits:
+          cpu: 50m
+          memory: 64Mi
+
+---
+# ClusterIssuer for Let's Encrypt ACME
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@example.com
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+      - http01:
+          ingress:
+            class: istio
+
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: admin@example.com
+    privateKeySecretRef:
+      name: letsencrypt-staging
+    solvers:
+      - http01:
+          ingress:
+            class: istio
+
+---
+# Monitoring Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    istio-injection: enabled
+
+---
+# Prometheus Operator
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: flux-system
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: flux-system
+      version: '>=50.0.0'
+  values:
+    namespace: monitoring
+    prometheus:
+      prometheusSpec:
+        serviceMonitorSelectorNilUsesHelmValues: false
+        replicas: 2
+        retention: 7d
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+    grafana:
+      adminPassword: admin
+      datasources:
+        datasources.yaml:
+          apiVersion: 1
+          datasources:
+            - name: Prometheus
+              type: prometheus
+              url: http://prometheus-operated:9090
+              isDefault: true
+    alertmanager:
+      config:
+        global:
+          resolve_timeout: 5m
+        route:
+          group_by: ['alertname', 'cluster']
+          group_wait: 10s
+          group_interval: 10s
+          repeat_interval: 12h
+          receiver: 'null'
+        receivers:
+          - name: 'null'
+
+---
+# OPA/Gatekeeper Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gatekeeper-system
+
+---
+# Gatekeeper via Helm
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: gatekeeper
+  namespace: flux-system
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: gatekeeper
+      sourceRef:
+        kind: HelmRepository
+        name: open-policy-agent
+        namespace: flux-system
+      version: 'v3.13.0'
+  values:
+    namespace: gatekeeper-system
+    replicas: 2
+    audit:
+      replicas: 1
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    enableExternalData: true
+
+---
+# ConstraintTemplate: Require Resource Limits
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlimits
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLimits
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredlimits
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.resources.limits.cpu
+          msg := sprintf("Container %v is missing required CPU limit", [container.name])
+        }
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.resources.limits.memory
+          msg := sprintf("Container %v is missing required memory limit", [container.name])
+        }
+
+---
+# Constraint: Enforce Resource Limits in application namespace
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLimits
+metadata:
+  name: require-limits
+spec:
+  match:
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - flux-system
+      - istio-system
+      - cert-manager
+      - gatekeeper-system
+  parameters:
+    required: ["cpu", "memory"]
+
+---
+# ConstraintTemplate: Image Registry Whitelist
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sallowedregistries
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sAllowedRegistries
+      validation:
+        openAPIV3Schema:
+          properties:
+            allowedRegistries:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sallowedregistries
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          image := container.image
+          allowed := input.parameters.allowedRegistries[_]
+          not startswith(image, allowed)
+          msg := sprintf("Image %v not from allowed registry", [image])
+        }
+
+---
+# Constraint: Whitelist approved registries
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sAllowedRegistries
+metadata:
+  name: allowed-registries
+spec:
+  match:
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+  parameters:
+    allowedRegistries:
+      - "registry.example.com/"
+      - "gcr.io/"
+      - "docker.io/"
+
+---
+# Network Policies
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all-ingress
+  namespace: application
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-same-namespace
+  namespace: application
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-istio
+  namespace: application
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+          podSelector:
+            matchLabels:
+              app: istio-ingressgateway
+
+---
+# HelmRepository sources for Flux
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: istio
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://istio-release.storage.googleapis.com/charts
+
+---
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: jetstack
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://charts.jetstack.io
+
+---
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: prometheus-community
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://prometheus-community.github.io/helm-charts
+
+---
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: open-policy-agent
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://open-policy-agent.github.io/gatekeeper/charts

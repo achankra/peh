@@ -1,0 +1,113 @@
+# tagging-patchset.yaml
+# Reusable patchset that enforces mandatory governance tags on all composed resources
+#
+# This patchset applies standard organizational tags/labels to resources created through
+# Crossplane compositions. It enables governance by ensuring all resources carry metadata
+# for owner identification, environment classification, cost allocation, and compliance tracking.
+#
+# Usage: Reference this patchset by name in your composition resources to apply these
+# governance tags automatically. Example:
+#   patches:
+#     - type: PatchSet
+#       patchSetName: required-tags
+
+patchSets:
+  - name: required-tags
+    description: "Applies mandatory governance tags for owner, cost center, environment, and resource tracking"
+    patches:
+      # Team/Owner Identification
+      # Maps the team label from the claim's metadata to the Team tag on the resource
+      - type: FromCompositeFieldPath
+        fromFieldPath: metadata.labels["platform.io/team"]
+        toFieldPath: spec.forProvider.tags["Team"]
+        policy:
+          fromFieldPath: Optional  # Warn if not provided but don't block
+
+      # Cost Allocation
+      # Tracks which cost center (business unit, project, etc.) should be charged for this resource
+      - type: FromCompositeFieldPath
+        fromFieldPath: metadata.labels["platform.io/cost-center"]
+        toFieldPath: spec.forProvider.tags["CostCenter"]
+        policy:
+          fromFieldPath: Optional  # Warn if not provided but don't block
+
+      # Environment Classification
+      # Applies the tier (development, staging, production) as an Environment tag
+      # for lifecycle management and compliance policies
+      - type: FromCompositeFieldPath
+        fromFieldPath: spec.parameters.tier
+        toFieldPath: spec.forProvider.tags["Environment"]
+
+      # Resource Management Reference
+      # Combines namespace and name to create a unique managed-by identifier
+      # Format: namespace/claim-name (e.g., "app-team/payment-database")
+      # Enables tracking which Kubernetes resource provisioned this infrastructure
+      - type: CombineFromComposite
+        combine:
+          variables:
+            - fromFieldPath: metadata.namespace
+            - fromFieldPath: metadata.name
+          strategy: string
+          string:
+            fmt: "%s/%s"
+        toFieldPath: spec.forProvider.tags["ManagedBy"]
+
+      # Optional: Owner Email/Contact
+      # If provided in the claim, tags the resource with a point of contact for escalations
+      - type: FromCompositeFieldPath
+        fromFieldPath: metadata.labels["platform.io/owner"]
+        toFieldPath: spec.forProvider.tags["Owner"]
+        policy:
+          fromFieldPath: Optional
+
+      # Optional: Compliance/Governance Tags
+      # Useful for resources subject to regulatory requirements
+      - type: FromCompositeFieldPath
+        fromFieldPath: metadata.labels["platform.io/compliance"]
+        toFieldPath: spec.forProvider.tags["Compliance"]
+        policy:
+          fromFieldPath: Optional
+
+      # Optional: Cost Center Alternative Name
+      # Provides human-readable project/application name for cost reporting
+      - type: FromCompositeFieldPath
+        fromFieldPath: metadata.labels["platform.io/application"]
+        toFieldPath: spec.forProvider.tags["Application"]
+        policy:
+          fromFieldPath: Optional
+
+  - name: lifecycle-labels
+    description: "Applies labels for infrastructure lifecycle management and automation"
+    patches:
+      # Indicates this resource was created by Crossplane (not manual provisioning)
+      - type: FromCompositeFieldPath
+        fromFieldPath: metadata.namespace
+        toFieldPath: metadata.labels["crossplane.io/managed"]
+        transforms:
+          - type: string
+            string:
+              type: Convert
+              convert: string
+        policy:
+          mergeOptions:
+            keepMapValues: true
+
+      # Propagate claim name for resource association
+      - type: FromCompositeFieldPath
+        fromFieldPath: metadata.name
+        toFieldPath: metadata.labels["crossplane.io/claim"]
+        policy:
+          mergeOptions:
+            keepMapValues: true
+
+  - name: common-metadata
+    description: "Applies standard Kubernetes labels for resource organization and selection"
+    patches:
+      # Propagate all labels from the composite claim to the managed resource
+      # This ensures custom labels added by the developer are preserved
+      - type: FromCompositeFieldPath
+        fromFieldPath: metadata.labels
+        toFieldPath: metadata.labels
+        policy:
+          mergeOptions:
+            keepMapValues: true

@@ -1,0 +1,48 @@
+# Chapter 13: Sloth SLO Specification for Auth Service
+# Listing 13.1 - SLO definition matching the manuscript's auth-service example
+# Sloth generates Prometheus recording and alerting rules from this spec.
+#
+# Usage:
+#   sloth generate -i sloth-auth-service-slo.yaml -o rules.yaml
+#
+# Generated metrics include:
+#   - slo:auth_service_availability:ratio_5m
+#   - slo:auth_service_availability:error_budget_rate
+#   - slo:auth_service_availability:error_budget_remaining
+
+version: "1"
+
+service: "auth-service"
+labels:
+  team: platform-engineering
+
+objectives:
+  - name: availability
+    description: "Percentage of successful authentication requests"
+    indicator:
+      latency:
+        - name: "auth_request_duration_seconds"
+          buckets:
+            - 0.1
+            - 0.5
+            - 1.0
+      slo: 99.95
+      alerting:
+        name: auth_slo_alert
+        labels:
+          severity: critical
+        annotations:
+          summary: "Auth service SLO at risk"
+
+  - name: latency
+    description: "95th percentile latency under 200ms"
+    indicator:
+      latency:
+        - name: "auth_request_duration_seconds"
+          buckets:
+            - 0.05
+            - 0.1
+            - 0.2
+      slo: 95
+      alerting:
+        name: auth_latency_slo_alert

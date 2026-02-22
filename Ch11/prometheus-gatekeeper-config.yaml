@@ -1,0 +1,18 @@
+# Chapter 11: Prometheus Configuration for Gatekeeper Metrics
+# Listing 11.9 - Scrape configuration for Gatekeeper audit metrics
+# Configures Prometheus to collect policy violation data from Gatekeeper.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-gatekeeper
+  namespace: monitoring
+data:
+  gatekeeper.yml: |
+    global:
+      scrape_interval: 30s
+    scrape_configs:
+      - job_name: 'gatekeeper'
+        static_configs:
+          - targets:
+              - ['gatekeeper-audit.gatekeeper-system:8888']

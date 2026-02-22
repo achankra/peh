@@ -1,0 +1,214 @@
+# ArgoCD Application manifest for deploying platform components
+# This demonstrates GitOps pattern for continuous deployment with multi-environment support
+
+---
+# ArgoCD Application for core platform services
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-core
+  namespace: argocd
+spec:
+  # ArgoCD project - provides RBAC and source restrictions
+  project: default
+
+  # Source repository configuration
+  source:
+    repoURL: https://github.com/your-org/platform-gitops  # Replace with your repo
+    path: apps/platform-core
+    targetRevision: HEAD
+    
+    # Helm values for multi-environment support
+    helm:
+      releaseName: platform-core
+      values: |
+        environment: staging
+        replicaCount: 2
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1024Mi
+      # Reference environment-specific values
+      valueFiles:
+        - values-base.yaml
+        - values-staging.yaml
+
+  # Destination cluster and namespace
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform-core
+    name: in-cluster
+
+  # Sync policy for automatic deployment
+  syncPolicy:
+    automated:
+      prune: true        # Delete resources removed from Git
+      selfHeal: true     # Resync if cluster diverges from Git
+      allowEmpty: false  # Prevent deletion of all resources
+    
+    syncOptions:
+      - CreateNamespace=true  # Create namespace if not exists
+    
+    # Progressive sync strategy
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # Ignore differences for generated/immutable fields
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas  # Ignore if HPA is managing replicas
+
+---
+# ArgoCD Application for observability platform
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-observability
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/your-org/platform-gitops
+    path: apps/observability
+    targetRevision: HEAD
+    
+    helm:
+      releaseName: platform-observability
+      values: |
+        prometheus:
+          enabled: true
+          retention: 30d
+          replicas: 2
+        grafana:
+          enabled: true
+          adminPassword: changeme
+        jaeger:
+          enabled: true
+          sampling:
+            rate: 0.1
+      
+      valueFiles:
+        - values-base.yaml
+        - values-staging.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform-monitoring
+    name: in-cluster
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+---
+# ArgoCD Application for ingress controller
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-ingress
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/your-org/platform-gitops
+    path: apps/ingress-nginx
+    targetRevision: HEAD
+    
+    helm:
+      releaseName: ingress-nginx
+      values: |
+        controller:
+          replicas: 2
+          service:
+            type: LoadBalancer
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+        metrics:
+          enabled: true
+      
+      valueFiles:
+        - values-base.yaml
+        - values-staging.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ingress-nginx
+    name: in-cluster
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+---
+# ArgoCD Project for multi-environment deployments
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  # Define source repositories
+  sourceRepos:
+    - 'https://github.com/your-org/*'
+    - 'https://charts.jetstack.io'
+    - 'https://aquasecurity.github.io/helm-charts/'
+    - 'https://prometheus-community.github.io/helm-charts'
+    - 'https://grafana.github.io/helm-charts'
+
+  # Define destinations (clusters and namespaces)
+  destinations:
+    - namespace: 'platform-*'
+      server: '*'
+    - namespace: 'ingress-*'
+      server: '*'
+    - namespace: 'platform-monitoring'
+      server: '*'
+
+  # Deny operations to system namespaces
+  namespaceResourceBlacklist:
+    - group: ''
+      kind: ResourceQuota
+    - group: ''
+      kind: LimitRange
+    - group: ''
+      kind: NetworkPolicy
+
+  # Cluster resources whitelist
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+
+  # Enforce signature verification
+  signatureKeys:
+    - keyID: ABCD1234

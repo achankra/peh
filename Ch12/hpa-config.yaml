@@ -1,0 +1,278 @@
+# Chapter 12: Horizontal Pod Autoscaler Configurations
+# Demonstrates CPU-based and custom metrics-based autoscaling
+# This example uses a demo web application with configurable load
+
+---
+# Namespace for our demo application
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cost-optimization-demo
+  labels:
+    team: platform-engineering
+
+---
+# ConfigMap for application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-app-config
+  namespace: cost-optimization-demo
+data:
+  app-name: "cost-optimization-demo"
+  environment: "production"
+
+---
+# Deployment: Demo Web Application
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-webapp
+  namespace: cost-optimization-demo
+  labels:
+    app: demo-webapp
+    team: platform-engineering
+    cost-allocation: platform-team
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-webapp
+  template:
+    metadata:
+      labels:
+        app: demo-webapp
+        team: platform-engineering
+        cost-allocation: platform-team
+    spec:
+      containers:
+      - name: webapp
+        # Using nginx as demo app
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+          name: http
+        # Resource requests (basis for HPA CPU metrics)
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        # Liveness and readiness probes
+        livenessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+# Service for demo application
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-webapp
+  namespace: cost-optimization-demo
+  labels:
+    app: demo-webapp
+spec:
+  selector:
+    app: demo-webapp
+  ports:
+  - port: 80
+    targetPort: http
+    name: http
+  type: ClusterIP
+
+---
+# HPA 1: CPU-based autoscaling
+# Scales based on CPU utilization percentage of requests
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: demo-webapp-cpu-hpa
+  namespace: cost-optimization-demo
+  labels:
+    team: platform-engineering
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: demo-webapp
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  # Scale up when CPU usage exceeds 70% of requested resources
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  # Scale down when memory usage is low (less aggressive)
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    # Scale-down behavior: conservative to avoid flapping
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait 5 min before scaling down
+      policies:
+      - type: Percent
+        value: 50  # Scale down by max 50% of current replicas
+        periodSeconds: 60
+      - type: Pods
+        value: 1   # Or remove 1 pod per minute (whichever is smaller)
+        periodSeconds: 60
+      selectPolicy: Min  # Apply the policy that scales down the least
+    # Scale-up behavior: aggressive to handle traffic spikes
+    scaleUp:
+      stabilizationWindowSeconds: 0    # Scale up immediately
+      policies:
+      - type: Percent
+        value: 100  # Double replicas if needed
+        periodSeconds: 30
+      - type: Pods
+        value: 2    # Add 2 pods per 30 seconds
+        periodSeconds: 30
+      selectPolicy: Max  # Apply the policy that scales up the most
+
+---
+# HPA 2: Custom metrics-based autoscaling (example)
+# This demonstrates structure for custom metrics (requires metrics exposed by app)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: demo-webapp-custom-hpa
+  namespace: cost-optimization-demo
+  labels:
+    team: platform-engineering
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: demo-webapp
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+  # Custom metric example: requests per second per pod
+  # Note: Requires custom metrics API and metrics from app
+  - type: Pods
+    pods:
+      metric:
+        name: http_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "1000"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 10  # Conservative: scale down by 10% per minute
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 50  # Scale up 50% when needed
+        periodSeconds: 30
+
+---
+# StatefulSet example: Stateful workload with HPA
+# For databases or services requiring persistent state
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: demo-stateful
+  namespace: cost-optimization-demo
+  labels:
+    app: demo-stateful
+    team: platform-engineering
+    cost-allocation: platform-team
+spec:
+  serviceName: demo-stateful
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-stateful
+  template:
+    metadata:
+      labels:
+        app: demo-stateful
+        team: platform-engineering
+        cost-allocation: platform-team
+    spec:
+      containers:
+      - name: app
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+
+---
+# Service for StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-stateful
+  namespace: cost-optimization-demo
+spec:
+  clusterIP: None  # Headless service
+  selector:
+    app: demo-stateful
+  ports:
+  - port: 80
+    targetPort: 80
+
+---
+# HPA 3: StatefulSet scaling (different behavior)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: demo-stateful-hpa
+  namespace: cost-optimization-demo
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: demo-stateful
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600  # More conservative for stateful
+      policies:
+      - type: Percent
+        value: 25  # Scale down max 25% per 10 minutes
+        periodSeconds: 600
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Pods
+        value: 1   # Add 1 pod per minute
+        periodSeconds: 60

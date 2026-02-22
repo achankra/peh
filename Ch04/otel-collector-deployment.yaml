@@ -1,0 +1,329 @@
+# Kubernetes manifests for deploying OpenTelemetry Collector
+# Runs as a DaemonSet to collect telemetry from all nodes
+# Also includes supporting services and RBAC permissions
+
+---
+# Namespace for observability stack
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+  labels:
+    name: observability
+
+---
+# ConfigMap containing OTEL Collector configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: observability
+data:
+  collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'kubernetes-pods'
+              scrape_interval: 30s
+              kubernetes_sd_configs:
+                - role: pod
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                  action: keep
+                  regex: "true"
+
+    processors:
+      batch:
+        send_batch_size: 1024
+        timeout: 10s
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 512
+      attributes:
+        actions:
+          - key: deployment.environment
+            value: production
+            action: upsert
+          - key: k8s.node.name
+            from_attribute: k8s.node.name
+            action: insert
+      resourcedetection:
+        detectors: [k8s, docker, env, system]
+        timeout: 5s
+
+    exporters:
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+      jaeger:
+        endpoint: jaeger-collector:14250
+        tls:
+          insecure: true
+      logging:
+        loglevel: info
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        metrics:
+          receivers: [otlp, prometheus]
+          processors: [memory_limiter, batch, attributes, resourcedetection]
+          exporters: [prometheus, logging]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, attributes, resourcedetection]
+          exporters: [jaeger, logging]
+
+---
+# RBAC: ServiceAccount for OTEL Collector
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: observability
+
+---
+# RBAC: ClusterRole for OTEL Collector (Kubernetes SD)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otel-collector
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list", "watch"]
+
+---
+# RBAC: ClusterRoleBinding for OTEL Collector
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otel-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otel-collector
+subjects:
+  - kind: ServiceAccount
+    name: otel-collector
+    namespace: observability
+
+---
+# Service for OTEL Collector OTLP receiver (used by applications)
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: observability
+  labels:
+    app: otel-collector
+spec:
+  type: ClusterIP
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      protocol: TCP
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      protocol: TCP
+      targetPort: 4318
+    - name: jaeger-grpc
+      port: 14250
+      protocol: TCP
+      targetPort: 14250
+    - name: metrics
+      port: 8889
+      protocol: TCP
+      targetPort: 8889
+    - name: healthcheck
+      port: 13133
+      protocol: TCP
+      targetPort: 13133
+  selector:
+    app: otel-collector
+
+---
+# DaemonSet: OTEL Collector running on every node
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: otel-collector
+  namespace: observability
+  labels:
+    app: otel-collector
+spec:
+  selector:
+    matchLabels:
+      app: otel-collector
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8889"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: otel-collector
+      hostNetwork: true
+      hostPID: true
+      dnsPolicy: ClusterFirstWithHostNet
+
+      # Host aliases for backend services (adjust as needed)
+      hostAliases:
+        - ip: "127.0.0.1"
+          hostnames:
+            - "jaeger-collector"
+
+      containers:
+        - name: otel-collector
+          # Use otel/opentelemetry-collector-k8s image for Kubernetes support
+          image: otel/opentelemetry-collector-k8s:0.88.0
+          imagePullPolicy: IfNotPresent
+
+          # Ports exposed by collector
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+            - name: jaeger-grpc
+              containerPort: 14250
+              protocol: TCP
+            - name: metrics
+              containerPort: 8889
+              protocol: TCP
+            - name: healthcheck
+              containerPort: 13133
+              protocol: TCP
+
+          # Volume mount for configuration
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+              readOnly: true
+
+          # Environment variables
+          env:
+            - name: GOGC
+              value: "80"
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          # Collector configuration argument
+          args:
+            - "--config=/conf/collector-config.yaml"
+
+          # Resource requests and limits
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          # Liveness probe: checks if collector is running
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Readiness probe: checks if collector is ready to receive data
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Security context
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: false
+
+      # Node affinity: run on all nodes (no restrictions)
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
+
+      # Tolerations: run on all nodes including tainted ones
+      tolerations:
+        - operator: "Exists"
+          effect: "NoSchedule"
+        - operator: "Exists"
+          effect: "NoExecute"
+
+      # Volume definitions
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector-config
+
+      # Pod security context
+      securityContext:
+        fsGroup: 65534
+
+---
+# Service for metrics scraping (optional separate service)
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-metrics
+  namespace: observability
+  labels:
+    app: otel-collector
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 8889
+      protocol: TCP
+      targetPort: 8889
+  selector:
+    app: otel-collector
+

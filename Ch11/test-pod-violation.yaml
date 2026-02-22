@@ -1,0 +1,180 @@
+# Chapter 11: Test Pod with Policy Violations
+# ==============================================
+# This manifest intentionally violates multiple platform policies
+# for testing Gatekeeper enforcement and policy validation.
+#
+# Violations:
+#   1. No resource limits/requests (violates K8sRequireResourceLimits)
+#   2. Uses :latest image tag (violates image versioning policy)
+#   3. Runs as root/privileged (violates security policy)
+#   4. Missing required labels (violates K8sRequiredLabels)
+#   5. No test-results annotation (violates require-tests-passed)
+#
+# Usage:
+#   kubectl apply -f test-pod-violation.yaml  # Will be denied/audited by Gatekeeper
+#   conftest test test-pod-violation.yaml --policy policies/
+
+---
+# NON-COMPLIANT POD: Privileged with no limits
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-violation-privileged-pod
+  namespace: default
+  # Missing required labels: team, owner, cost-center
+  labels:
+    app: violation-test
+    # Missing: test-results annotation
+spec:
+  containers:
+  - name: privileged-container
+    image: ubuntu:latest
+    # VIOLATION: No resource limits
+    # VIOLATION: No resource requests
+    securityContext:
+      privileged: true        # VIOLATION: Privileged mode
+      runAsUser: 0            # VIOLATION: Running as root (UID 0)
+      allowPrivilegeEscalation: true  # VIOLATION: Allows privilege escalation
+    command: ["/bin/sleep", "3600"]
+
+---
+# NON-COMPLIANT DEPLOYMENT: Multiple violations
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-violation-web-app
+  namespace: default
+  # VIOLATION: Missing required labels
+  labels:
+    app: web-app-violation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web-app-violation
+  template:
+    metadata:
+      labels:
+        app: web-app-violation
+      # VIOLATION: Missing test-results annotation
+      annotations:
+        description: "This pod intentionally violates policies"
+    spec:
+      # VIOLATION: No securityContext at pod level
+      containers:
+      - name: web
+        # VIOLATION: Using :latest tag
+        image: nginx:latest
+        ports:
+        - containerPort: 8080
+        # VIOLATION: No resources section at all
+        securityContext:
+          privileged: false
+          runAsUser: 0          # VIOLATION: Running as root
+          runAsNonRoot: false
+          allowPrivilegeEscalation: true  # VIOLATION
+
+---
+# NON-COMPLIANT POD: Missing resource limits
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-violation-worker-pod
+  namespace: default
+  # VIOLATION: Missing required labels
+  labels:
+    app: worker
+  annotations:
+    # VIOLATION: test-results not "passed"
+    test-results: "pending"
+spec:
+  containers:
+  - name: worker
+    image: python:3.11
+    # VIOLATION: No resources.limits
+    # VIOLATION: No resources.requests
+    resources:
+      # Incomplete - has neither requests nor limits
+    env:
+    - name: WORKER_ID
+      value: "test-worker-1"
+    command: ["python", "-c", "import time; time.sleep(3600)"]
+
+---
+# NON-COMPLIANT POD: Using untrusted registry
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-violation-untrusted-registry
+  namespace: default
+  # VIOLATION: Missing labels
+  labels:
+    app: untrusted
+spec:
+  containers:
+  - name: app
+    # VIOLATION: Not from approved registry
+    image: docker.io/arbitrary-user/arbitrary-image:v1.0.0
+    resources:
+      # VIOLATION: No resource definitions
+    securityContext:
+      privileged: false
+      runAsUser: 1000
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+
+---
+# NON-COMPLIANT DEPLOYMENT: Init container with no limits
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-violation-init-container
+  namespace: default
+  labels:
+    app: init-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: init-test
+  template:
+    metadata:
+      labels:
+        app: init-test
+    spec:
+      initContainers:
+      - name: setup
+        # VIOLATION: Using :latest tag
+        image: busybox:latest
+        # VIOLATION: No resource limits/requests
+        command: ['sh', '-c', 'echo "Setting up..."']
+      containers:
+      - name: app
+        image: gcr.io/myapp:latest  # VIOLATION: :latest tag
+        # VIOLATION: No resources
+        securityContext:
+          privileged: false
+          runAsUser: 1000
+
+---
+# Notes for testing:
+# ==================
+# 1. Deploy with: kubectl apply -f test-pod-violation.yaml
+#
+# 2. If Gatekeeper is in 'deny' mode (not 'dryrun'), deployments will be rejected
+#    with violation messages detailing the policy failures.
+#
+# 3. If Gatekeeper is in 'audit' mode, check audit logs:
+#    kubectl get constraints --all-namespaces -o json | jq '.items[].status.violations'
+#
+# 4. Run conftest validation:
+#    conftest test test-pod-violation.yaml --policy policies/ --policy conftest-tests/
+#
+# 5. Expected violations should include:
+#    - Missing resource limits/requests (all containers)
+#    - Using :latest image tags
+#    - Running as root (uid 0)
+#    - Missing required labels (team, owner, cost-center)
+#    - Missing test-results annotation or not set to "passed"
+#    - Privileged containers
+#    - Untrusted image registries

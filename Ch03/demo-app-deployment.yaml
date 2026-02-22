@@ -1,0 +1,452 @@
+################################################################################
+# Demo Application Kubernetes Deployment
+#
+# Purpose: Example application deployment with secure TLS configuration
+# Components:
+#   - Namespace for application isolation
+#   - ServiceAccount with minimal permissions
+#   - Deployment with security best practices
+#   - Service for internal communication
+#   - Ingress with TLS termination
+#   - NetworkPolicy for traffic control
+#   - PodDisruptionBudget for high availability
+#
+# Usage: kubectl apply -f demo-app-deployment.yaml
+################################################################################
+
+---
+# Namespace for demo application
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-app
+  labels:
+    name: demo-app
+    environment: production
+    app: demo-application
+
+---
+# ServiceAccount for demo app
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: demo-app-sa
+  namespace: demo-app
+  labels:
+    app: demo-app
+    component: service-account
+
+---
+# ConfigMap: Application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-app-config
+  namespace: demo-app
+  labels:
+    app: demo-app
+    component: configuration
+data:
+  APP_ENV: "production"
+  LOG_LEVEL: "info"
+  PORT: "8080"
+  HEALTH_CHECK_PATH: "/health"
+
+---
+# Secret: Application secrets (base64 encoded)
+# WARNING: In production, use external secret management (Vault, AWS Secrets Manager, etc.)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: demo-app-secrets
+  namespace: demo-app
+  labels:
+    app: demo-app
+    component: secrets
+type: Opaque
+stringData:
+  # Example credentials - CHANGE IN PRODUCTION
+  API_KEY: "demo-api-key-change-me-in-production"
+  DATABASE_PASSWORD: "demo-db-password-change-me"
+  JWT_SECRET: "demo-jwt-secret-change-me-in-production"
+
+---
+# Deployment: Demo application
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  namespace: demo-app
+  labels:
+    app: demo-app
+    version: "1.0"
+    component: application
+spec:
+  replicas: 3
+  
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  
+  selector:
+    matchLabels:
+      app: demo-app
+  
+  template:
+    metadata:
+      labels:
+        app: demo-app
+        version: "1.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    
+    spec:
+      # Use dedicated service account
+      serviceAccountName: demo-app-sa
+      
+      # Security: Run as non-root user
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 3000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+      
+      # Affinity rules for high availability
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - demo-app
+                topologyKey: kubernetes.io/hostname
+      
+      # Termination grace period
+      terminationGracePeriodSeconds: 30
+      
+      containers:
+        - name: demo-app
+          # Use specific image version (not 'latest')
+          image: nginx:1.24-alpine
+          imagePullPolicy: IfNotPresent
+          
+          # Container ports
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          
+          # Security context for container
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - NET_BIND_SERVICE
+          
+          # Environment variables
+          env:
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: demo-app-config
+                  key: APP_ENV
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: demo-app-config
+                  key: LOG_LEVEL
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: demo-app-config
+                  key: PORT
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: demo-app-secrets
+                  key: API_KEY
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: demo-app-secrets
+                  key: DATABASE_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: demo-app-secrets
+                  key: JWT_SECRET
+          
+          # Volume mounts
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: var-cache
+              mountPath: /var/cache
+            - name: var-run
+              mountPath: /var/run
+          
+          # Resource requests and limits
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          
+          # Liveness probe: Check if app is alive
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          # Readiness probe: Check if app can accept traffic
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          
+          # Startup probe: Check initial startup (slower)
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 30
+      
+      # Volumes
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: var-cache
+          emptyDir: {}
+        - name: var-run
+          emptyDir: {}
+
+---
+# Service: ClusterIP for internal communication
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-app
+  namespace: demo-app
+  labels:
+    app: demo-app
+    component: service
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  selector:
+    app: demo-app
+
+---
+# Ingress: TLS termination and external access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo-app-ingress
+  namespace: demo-app
+  labels:
+    app: demo-app
+    component: ingress
+  annotations:
+    # cert-manager annotations for automatic TLS
+    cert-manager.io/cluster-issuer: "letsencrypt-production"
+    # nginx ingress controller annotations
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    # Security headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains";
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+spec:
+  ingressClassName: nginx
+  
+  # TLS configuration with automatic certificate
+  tls:
+    - hosts:
+        - demo-app.example.com
+        - www.demo-app.example.com
+      secretName: demo-app-tls
+  
+  rules:
+    - host: demo-app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: demo-app
+                port:
+                  number: 80
+    
+    - host: www.demo-app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: demo-app
+                port:
+                  number: 80
+
+---
+# NetworkPolicy: Restrict traffic to demo-app
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: demo-app-network-policy
+  namespace: demo-app
+  labels:
+    app: demo-app
+    component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: demo-app
+  
+  policyTypes:
+    - Ingress
+    - Egress
+  
+  # Allow ingress from ingress controller
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 9090
+  
+  # Allow egress to DNS and external services
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow HTTPS outbound
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+
+---
+# PodDisruptionBudget: Ensure availability during maintenance
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: demo-app-pdb
+  namespace: demo-app
+  labels:
+    app: demo-app
+    component: pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: demo-app
+
+---
+# HorizontalPodAutoscaler: Auto-scale based on CPU
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: demo-app-hpa
+  namespace: demo-app
+  labels:
+    app: demo-app
+    component: autoscaling
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: demo-app
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+################################################################################
+# Verification Commands
+#
+# Check deployment status:
+#   kubectl get deployment -n demo-app
+#   kubectl describe deployment demo-app -n demo-app
+#
+# Check service:
+#   kubectl get service -n demo-app
+#
+# Check ingress:
+#   kubectl get ingress -n demo-app
+#   kubectl describe ingress demo-app-ingress -n demo-app
+#
+# Check certificate:
+#   kubectl get certificate -n demo-app
+#   kubectl describe certificate demo-app-cert -n demo-app
+#
+# Check pod status:
+#   kubectl get pods -n demo-app -o wide
+#   kubectl logs -n demo-app <pod-name>
+#
+# Test access:
+#   curl -k https://demo-app.example.com
+#   kubectl port-forward -n demo-app svc/demo-app 8080:80
+#
+################################################################################

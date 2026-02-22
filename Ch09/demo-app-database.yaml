@@ -1,0 +1,21 @@
+# demo-app/infrastructure/database.yaml
+# PostgreSQL claim for the demo application
+# This demonstrates how teams request databases through simple configuration
+
+apiVersion: database.platform.io/v1alpha1
+kind: PostgreSQLClaim
+metadata:
+  name: demo-app-db
+  namespace: team-alpha
+  labels:
+    platform.io/team: team-alpha
+    platform.io/owner: demo-app
+    platform.io/cost-center: engineering
+spec:
+  parameters:
+    storageGB: 20
+    version: "15"
+    tier: development
+    enableBackups: true
+  writeConnectionSecretToRef:
+    name: demo-app-db-connection

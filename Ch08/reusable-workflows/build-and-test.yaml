@@ -1,0 +1,190 @@
+# Reusable workflow for building and testing applications
+# This workflow provides a composable task that can be called from other workflows
+# 
+# Usage:
+#   - uses: ./.github/workflows/reusable/build-and-test.yaml
+#     with:
+#       language: python
+#       python-version: '3.10'
+#       build-command: 'pip install -r requirements.txt && python setup.py build'
+#       test-command: 'pytest tests/'
+
+name: Build and Test
+
+on:
+  workflow_call:
+    inputs:
+      language:
+        required: true
+        type: string
+        description: 'Programming language (python, node, go, java)'
+      language-version:
+        required: false
+        type: string
+        description: 'Version of the language (e.g., 3.10, 16.x, 1.19)'
+        default: 'latest'
+      build-command:
+        required: false
+        type: string
+        description: 'Custom build command'
+        default: ''
+      test-command:
+        required: false
+        type: string
+        description: 'Custom test command'
+        default: ''
+      artifact-path:
+        required: false
+        type: string
+        description: 'Path to build artifacts to upload'
+        default: 'dist/,build/'
+      artifact-name:
+        required: false
+        type: string
+        description: 'Name for uploaded artifact'
+        default: 'build-artifact'
+    outputs:
+      artifact-name:
+        description: 'Name of uploaded build artifact'
+        value: ${{ jobs.build.outputs.artifact-name }}
+      build-status:
+        description: 'Status of build (success, failure)'
+        value: ${{ jobs.build.outputs.status }}
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-name: ${{ steps.upload.outputs.artifact-name }}
+      status: ${{ job.status }}
+    
+    steps:
+      # 1. Check out code
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2. Set up language environment based on language input
+      - name: Set up Python
+        if: inputs.language == 'python'
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ inputs.language-version }}
+          cache: 'pip'
+
+      - name: Set up Node.js
+        if: inputs.language == 'node'
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ inputs.language-version }}
+          cache: 'npm'
+
+      - name: Set up Go
+        if: inputs.language == 'go'
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ inputs.language-version }}
+
+      # 3. Install dependencies
+      - name: Install Python dependencies
+        if: inputs.language == 'python'
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+
+      - name: Install Node.js dependencies
+        if: inputs.language == 'node'
+        run: npm ci
+
+      - name: Install Go dependencies
+        if: inputs.language == 'go'
+        run: go mod download
+
+      # 4. Run custom build command if provided
+      - name: Build (custom command)
+        if: inputs.build-command != ''
+        run: ${{ inputs.build-command }}
+
+      # 5. Run language-specific build if no custom command
+      - name: Build Python package
+        if: inputs.language == 'python' && inputs.build-command == ''
+        run: |
+          python -m pip install build
+          python -m build
+
+      - name: Build Node.js package
+        if: inputs.language == 'node' && inputs.build-command == ''
+        run: npm run build --if-present
+
+      - name: Build Go binary
+        if: inputs.language == 'go' && inputs.build-command == ''
+        run: go build -o ./bin/app ./cmd/main.go
+
+      # 6. Run tests
+      - name: Run Python tests
+        if: inputs.language == 'python' && inputs.test-command == ''
+        run: |
+          pytest tests/ \
+            --junit-xml=test-results.xml \
+            --cov \
+            --cov-report=xml \
+            --cov-report=html
+        continue-on-error: false
+
+      - name: Run Node.js tests
+        if: inputs.language == 'node' && inputs.test-command == ''
+        run: npm test -- --coverage --watchAll=false
+        continue-on-error: false
+
+      - name: Run Go tests
+        if: inputs.language == 'go' && inputs.test-command == ''
+        run: |
+          go test -v \
+            -coverprofile=coverage.out \
+            ./...
+
+      - name: Run custom tests
+        if: inputs.test-command != ''
+        run: ${{ inputs.test-command }}
+        continue-on-error: false
+
+      # 7. Upload test results
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results
+          path: |
+            test-results.xml
+            coverage.xml
+            coverage.out
+
+      # 8. Publish test results
+      - name: Publish test results
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: test-results.xml
+          check_name: Test Results
+
+      # 9. Upload build artifacts
+      - name: Upload artifacts
+        id: upload
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.artifact-path }}
+          retention-days: 7
+        env:
+          artifact-name: ${{ inputs.artifact-name }}
+
+      # 10. Summary
+      - name: Build Summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Language: ${{ inputs.language }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: Success" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifact: ${{ inputs.artifact-name }}" >> $GITHUB_STEP_SUMMARY

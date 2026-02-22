@@ -1,0 +1,196 @@
+# Backstage Helm Chart Values
+# This configuration deploys Backstage on Kubernetes with production-ready settings
+# Includes PostgreSQL, ingress, and SSO authentication
+
+# Image configuration
+image:
+  registry: ghcr.io
+  repository: backstage/backstage
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# Number of replicas for high availability
+replicaCount: 2
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 7007
+
+# Ingress configuration for external access
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+  hosts:
+    - host: backstage.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: backstage-tls
+      hosts:
+        - backstage.example.com
+
+# PostgreSQL Configuration
+postgresql:
+  enabled: true
+  auth:
+    username: backstage
+    password: ChangeMe123!
+    database: backstage
+  primary:
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClassName: standard
+  service:
+    port: 5432
+
+# Backstage configuration
+backstage:
+  # App configuration (app-config.yaml)
+  appConfig:
+    app:
+      title: Backstage Developer Portal
+      baseUrl: https://backstage.example.com
+    backend:
+      baseUrl: https://backstage.example.com
+      listen:
+        port: 7007
+      database:
+        client: pg
+        connection:
+          host: backstage-postgresql
+          port: 5432
+          user: backstage
+          password: ChangeMe123!
+          database: backstage
+      cache:
+        store: memory
+
+  # Frontend configuration
+  frontend:
+    app:
+      title: Backstage Developer Portal
+    baseUrl: https://backstage.example.com
+
+  # Core plugins
+  plugins:
+    - name: catalog
+      enabled: true
+    - name: auth
+      enabled: true
+    - name: search
+      enabled: true
+    - name: kubernetes
+      enabled: true
+
+# Environment variables
+env:
+  NODE_ENV: production
+  LOG_LEVEL: info
+
+# Resource requests and limits
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+# Autoscaling configuration
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 85
+
+# Service Account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: backstage
+
+# RBAC
+rbac:
+  create: true
+
+# Security Context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Network Policies
+networkPolicy:
+  enabled: false
+
+# Pod Disruption Budget for high availability
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Node affinity (optional, for specific node pools)
+affinity: {}
+
+# Tolerations for node taints
+tolerations: []
+
+# Health checks
+livenessProbe:
+  httpGet:
+    path: /healthcheck
+    port: 7007
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+
+readinessProbe:
+  httpGet:
+    path: /healthcheck
+    port: 7007
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+
+# OAuth/SSO Configuration (Keycloak)
+oauth:
+  enabled: true
+  provider: keycloak
+  keycloak:
+    realm: backstage
+    clientId: backstage
+    clientSecret: your-client-secret
+    authorizationUrl: https://keycloak.example.com/auth/realms/backstage/protocol/openid-connect/auth
+    tokenUrl: https://keycloak.example.com/auth/realms/backstage/protocol/openid-connect/token
+    userInfoUrl: https://keycloak.example.com/auth/realms/backstage/protocol/openid-connect/userinfo
+
+# Persistent Storage
+persistence:
+  enabled: true
+  storageClassName: standard
+  size: 5Gi
+  mountPath: /var/lib/backstage
+
+# ConfigMap for app-config.yaml
+configMap:
+  enabled: true
+  name: backstage-config
+
+# Secrets for sensitive data
+secrets:
+  enabled: true
+  name: backstage-secrets
+  backend:
+    database:
+      password: ChangeMe123!
+  auth:
+    oauth:
+      clientSecret: your-client-secret-here
+

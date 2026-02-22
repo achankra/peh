@@ -1,0 +1,304 @@
+# Kubernetes Manifests Template for Team Namespace Bootstrap
+#
+# This template is applied for each team to set up:
+# - Namespace with labels and annotations
+# - ResourceQuota to limit resource consumption
+# - LimitRange to set default resource requests/limits
+# - NetworkPolicy for namespace isolation
+# - RBAC ClusterRoleBindings for team access
+#
+# Template variables (replaced during provisioning):
+# {{TEAM_ID}} - Team identifier (e.g., platform-team)
+# {{TEAM_DISPLAY_NAME}} - Human-readable team name
+# {{TEAM_LEAD}} - Email of team lead
+# {{CPU_QUOTA}} - CPU quota (e.g., 10)
+# {{MEMORY_QUOTA}} - Memory quota (e.g., 50Gi)
+# {{POD_QUOTA}} - Pod quota (e.g., 100)
+# {{STORAGE_QUOTA}} - Storage quota (e.g., 100Gi)
+
+---
+# Namespace with metadata labels for team identification
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-{{TEAM_ID}}
+  labels:
+    team: {{TEAM_ID}}
+    managed-by: onboarding-api
+    type: team-namespace
+  annotations:
+    team.platform.io/lead: {{TEAM_LEAD}}
+    team.platform.io/display-name: {{TEAM_DISPLAY_NAME}}
+    team.platform.io/created-at: "{{CREATION_TIMESTAMP}}"
+
+---
+# ResourceQuota to enforce resource limits per namespace
+# Prevents one team from consuming all cluster resources
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{TEAM_ID}}-quota
+  namespace: team-{{TEAM_ID}}
+spec:
+  hard:
+    # CPU requests and limits
+    requests.cpu: "{{CPU_QUOTA}}"
+    limits.cpu: "{{CPU_QUOTA}}"
+    
+    # Memory requests and limits
+    requests.memory: "{{MEMORY_QUOTA}}"
+    limits.memory: "{{MEMORY_QUOTA}}"
+    
+    # Pod quota
+    pods: "{{POD_QUOTA}}"
+    
+    # Storage quota
+    requests.storage: "{{STORAGE_QUOTA}}"
+    persistentvolumeclaims: "10"
+    
+    # ConfigMap and Secret quotas
+    configmaps: "50"
+    secrets: "100"
+    
+    # Service quotas
+    services: "20"
+    services.loadbalancers: "2"
+  
+  scopeSelector:
+    matchExpressions:
+      # Apply quota to all pods in this namespace
+      - operator: In
+        scopeName: PriorityClass
+        values: ["default", "high-priority"]
+
+---
+# LimitRange to set default requests/limits for containers
+# Ensures all workloads have resource constraints
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{TEAM_ID}}-limits
+  namespace: team-{{TEAM_ID}}
+spec:
+  limits:
+    # Container defaults
+    - type: Container
+      default:
+        cpu: "1"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "250m"
+        memory: "256Mi"
+      max:
+        cpu: "2"
+        memory: "2Gi"
+      min:
+        cpu: "50m"
+        memory: "64Mi"
+    
+    # Pod defaults
+    - type: Pod
+      max:
+        cpu: "4"
+        memory: "4Gi"
+      min:
+        cpu: "50m"
+        memory: "64Mi"
+    
+    # PVC defaults
+    - type: PersistentVolumeClaim
+      max:
+        storage: "50Gi"
+      min:
+        storage: "1Gi"
+
+---
+# NetworkPolicy for namespace isolation
+# Restricts traffic between namespaces, allows internal communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{TEAM_ID}}-isolation
+  namespace: team-{{TEAM_ID}}
+spec:
+  # Default deny all ingress
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  
+  ingress:
+    # Allow traffic between pods in the same namespace
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8443
+        - protocol: TCP
+          port: 3000
+        - protocol: UDP
+          port: 53
+    
+    # Allow DNS queries (required for service discovery)
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+  
+  egress:
+    # Allow all egress to external networks
+    - to:
+        - namespaceSelector: {}
+    # Allow egress to external IPs (for external APIs)
+    - to:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+        - protocol: UDP
+          port: 53
+
+---
+# Role for team members to manage resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: team-developer-role
+  namespace: team-{{TEAM_ID}}
+rules:
+  # Deployments
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  
+  # Pods
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  
+  # Services and network
+  - apiGroups: [""]
+    resources: ["services", "endpoints"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  
+  # ConfigMaps and Secrets
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  
+  # Jobs and CronJobs
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  
+  # Persistent volumes
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  
+  # Ingress
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  
+  # Helm releases (if using Helm)
+  - apiGroups: ["helm.sh"]
+    resources: ["releases"]
+    verbs: ["get", "list", "create", "update", "patch"]
+
+---
+# RoleBinding for team lead (admin access)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: team-lead-binding
+  namespace: team-{{TEAM_ID}}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+  - kind: Group
+    name: "team:{{TEAM_ID}}:lead"
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for developers (edit access)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: team-developer-binding
+  namespace: team-{{TEAM_ID}}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
+subjects:
+  - kind: Group
+    name: "team:{{TEAM_ID}}:developer"
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for viewers (read-only access)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: team-viewer-binding
+  namespace: team-{{TEAM_ID}}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: Group
+    name: "team:{{TEAM_ID}}:viewer"
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# ServiceAccount for team applications
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: team-default
+  namespace: team-{{TEAM_ID}}
+
+---
+# Role for team applications to read their own namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: application-reader
+  namespace: team-{{TEAM_ID}}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services", "endpoints"]
+    verbs: ["get", "list"]
+
+---
+# Bind application ServiceAccount to reader role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: application-reader-binding
+  namespace: team-{{TEAM_ID}}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: application-reader
+subjects:
+  - kind: ServiceAccount
+    name: team-default
+    namespace: team-{{TEAM_ID}}

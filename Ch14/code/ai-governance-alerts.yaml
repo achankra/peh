@@ -1,0 +1,237 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ai-governance-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: ai_agent_governance
+      interval: 30s
+      rules:
+        # Alert when AI agent confidence is consistently low
+        - alert: LowAIConfidence
+          expr: |
+            avg_over_time(ai_agent_confidence[15m]) < 0.5
+          for: 10m
+          labels:
+            severity: warning
+            category: ai-governance
+            component: ai-agent
+          annotations:
+            summary: "AI agent confidence is below acceptable threshold"
+            description: "Agent {{ $labels.agent_type }} has average confidence of {{ $value | humanizePercentage }} (threshold: 50%)"
+            dashboard_url: "https://grafana.example.com/d/ai-agents"
+            runbook: "https://runbooks.example.com/low-ai-confidence"
+        
+        # Alert for high human override rate
+        - alert: HighHumanOverrideRate
+          expr: |
+            (rate(ai_agent_human_overrides_total[1h]) / rate(ai_agent_requests_total{status="success"}[1h])) > 0.3
+          for: 15m
+          labels:
+            severity: warning
+            category: ai-governance
+            component: ai-agent
+          annotations:
+            summary: "High rate of human overrides for AI decisions"
+            description: "Agent {{ $labels.agent_type }} has override rate of {{ $value | humanizePercentage }} (threshold: 30%)"
+            dashboard_url: "https://grafana.example.com/d/ai-agents"
+            runbook: "https://runbooks.example.com/ai-override-rate"
+        
+        # Alert for excessive AI agent errors
+        - alert: AIAgentErrors
+          expr: |
+            (rate(ai_agent_errors_total[5m]) / rate(ai_agent_requests_total[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            category: ai-governance
+            component: ai-agent
+          annotations:
+            summary: "AI agent error rate is above acceptable threshold"
+            description: "Agent {{ $labels.agent_type }} has error rate of {{ $value | humanizePercentage }} (threshold: 5%)"
+            error_type: "{{ $labels.error_type }}"
+            dashboard_url: "https://grafana.example.com/d/ai-agents"
+            runbook: "https://runbooks.example.com/ai-agent-errors"
+        
+        # Alert for high AI latency
+        - alert: AILatencyHigh
+          expr: |
+            histogram_quantile(0.99, rate(ai_agent_latency_seconds_bucket[5m])) > 10
+          for: 10m
+          labels:
+            severity: warning
+            category: ai-governance
+            component: ai-agent
+          annotations:
+            summary: "AI agent latency is above target"
+            description: "Agent {{ $labels.agent_type }} p99 latency is {{ $value | humanize }}s (threshold: 10s)"
+            dashboard_url: "https://grafana.example.com/d/ai-agents"
+            runbook: "https://runbooks.example.com/ai-latency"
+        
+        # Alert when AI decisions drop significantly
+        - alert: AIDecisionRateDrop
+          expr: |
+            rate(ai_decisions_total[5m]) < 0.1
+          for: 15m
+          labels:
+            severity: warning
+            category: ai-governance
+            component: ai-agent
+          annotations:
+            summary: "AI agent decision rate has dropped significantly"
+            description: "Agent {{ $labels.agent_type }} decision rate is {{ $value | humanize }}/sec (expected > 0.1/sec)"
+            dashboard_url: "https://grafana.example.com/d/ai-agents"
+        
+        # Alert for AI model accuracy degradation
+        - alert: AIModelAccuracyDegraded
+          expr: |
+            (ai_model_accuracy < 0.85) and 
+            (ai_model_accuracy < ignoring (model_version) (avg without (model_version) (ai_model_accuracy)) - 0.05)
+          for: 30m
+          labels:
+            severity: warning
+            category: ai-governance
+            component: ai-agent
+          annotations:
+            summary: "AI model accuracy has degraded"
+            description: "Agent {{ $labels.agent_type }} accuracy is {{ $value | humanizePercentage }} (expected > 85%)"
+            model_version: "{{ $labels.model_version }}"
+            runbook: "https://runbooks.example.com/model-degradation"
+        
+        # Alert for excessive active AI operations
+        - alert: HighAIOperationLoad
+          expr: |
+            ai_agent_active_operations > 100
+          for: 5m
+          labels:
+            severity: warning
+            category: ai-governance
+            component: ai-agent
+          annotations:
+            summary: "High load of active AI operations"
+            description: "Agent {{ $labels.agent_type }} has {{ $value | humanize }} active operations (threshold: 100)"
+            dashboard_url: "https://grafana.example.com/d/ai-agents"
+        
+        # Recording rule for AI success rate
+        - record: ai_agent:success_rate:5m
+          expr: |
+            rate(ai_agent_requests_total{status="success"}[5m]) / 
+            (rate(ai_agent_requests_total[5m]) + 0.001)
+        
+        # Recording rule for human override rate
+        - record: ai_agent:override_rate:5m
+          expr: |
+            rate(ai_agent_human_overrides_total[5m]) / 
+            (rate(ai_agent_requests_total[5m]) + 0.001)
+        
+        # Recording rule for error rate
+        - record: ai_agent:error_rate:5m
+          expr: |
+            rate(ai_agent_errors_total[5m]) / 
+            (rate(ai_agent_requests_total[5m]) + 0.001)
+        
+        # Recording rule for average latency
+        - record: ai_agent:avg_latency:5m
+          expr: |
+            rate(ai_agent_latency_seconds_sum[5m]) / 
+            (rate(ai_agent_latency_seconds_count[5m]) + 0.001)
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ai-governance-slos
+  namespace: monitoring
+spec:
+  groups:
+    - name: ai_agent_slos
+      interval: 30s
+      rules:
+        # SLO: AI decision success rate should be > 99%
+        - record: ai:slo:decision_success_rate
+          expr: |
+            ai_agent:success_rate:5m >= 0.99
+        
+        # SLO: Human override rate should be < 5%
+        - record: ai:slo:override_rate
+          expr: |
+            ai_agent:override_rate:5m < 0.05
+        
+        # SLO: Error rate should be < 1%
+        - record: ai:slo:error_rate
+          expr: |
+            ai_agent:error_rate:5m < 0.01
+        
+        # SLO: P99 latency should be < 5 seconds
+        - record: ai:slo:latency_p99
+          expr: |
+            histogram_quantile(0.99, rate(ai_agent_latency_seconds_bucket[5m])) < 5
+        
+        # Overall AI governance SLO
+        - record: ai:slo:overall
+          expr: |
+            (ai:slo:decision_success_rate and ai:slo:override_rate and 
+             ai:slo:error_rate and ai:slo:latency_p99) or on() vector(0)
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-governance-runbooks
+  namespace: monitoring
+data:
+  low-ai-confidence.md: |
+    # Low AI Confidence Alert
+    
+    ## Description
+    The average confidence level of AI agent decisions has fallen below 50%.
+    
+    ## Investigation Steps
+    1. Check AI agent logs for errors or warnings
+    2. Review recent changes to training data or model
+    3. Examine input data quality to the AI agent
+    4. Check system resource utilization
+    5. Review human feedback and override patterns
+    
+    ## Resolution
+    - Retrain the model with fresh data
+    - Update feature engineering pipeline
+    - Increase confidence threshold in alert rules
+    - Scale up infrastructure if resource-constrained
+  
+  high-override-rate.md: |
+    # High Human Override Rate Alert
+    
+    ## Description
+    Humans are overriding AI agent decisions at a rate > 30%.
+    
+    ## Investigation Steps
+    1. Analyze which decisions are being overridden
+    2. Check if there's a pattern in override reasons
+    3. Review confidence scores of overridden decisions
+    4. Examine model accuracy metrics
+    
+    ## Resolution
+    - Investigate model bias or drift
+    - Improve training data quality
+    - Adjust model hyperparameters
+    - Consider retraining with recent data
+  
+  ai-agent-errors.md: |
+    # AI Agent Error Rate Alert
+    
+    ## Description
+    AI agent error rate exceeds 5%.
+    
+    ## Investigation Steps
+    1. Check error logs for error types
+    2. Review recent deployments or changes
+    3. Verify external dependencies (APIs, databases)
+    4. Check system resources (CPU, memory)
+    
+    ## Resolution
+    - Rollback recent changes
+    - Scale infrastructure if needed
+    - Fix dependency issues
+    - Implement retry logic or circuit breakers

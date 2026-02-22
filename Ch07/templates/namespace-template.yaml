@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-namespace-placeholder
+  labels:
+    team: team-name
+    cost-center: "engineering"
+    tier: standard
+    managed-by: platform-onboarding
+spec:
+  finalizers:
+    - kubernetes

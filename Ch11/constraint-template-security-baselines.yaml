@@ -1,0 +1,42 @@
+# Chapter 11: ConstraintTemplate for Security Baselines
+# Listing 11.6 - Security baselines policy combining multiple checks:
+#   - No privileged containers
+#   - Read-only root filesystem required
+#   - No dangerous Linux capabilities (SYS_ADMIN)
+
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: ConstraintTemplate
+metadata:
+  name: k8ssecuritybaselines
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sSecurityBaselines
+      validation:
+        openAPIV3Schema:
+          properties:
+            message:
+              type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8ssecuritybaselines
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          container.securityContext.privileged == true
+          msg := sprintf("Container %v is running in privileged mode", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.securityContext.readOnlyRootFilesystem
+          msg := sprintf("Container %v should have a read-only root filesystem", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          container.securityContext.capabilities.add[_] == "SYS_ADMIN"
+          msg := sprintf("Container %v is requesting dangerous Linux capabilities", [container.name])
+        }

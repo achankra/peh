@@ -1,0 +1,91 @@
+# composition-postgresql.yaml
+# Composition that implements the PostgreSQL XRD interface
+# Maps the simple claim to fully configured AWS RDS resources
+
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: postgresql-aws
+  labels:
+    provider: aws
+    database: postgresql
+spec:
+  compositeTypeRef:
+    apiVersion: database.platform.io/v1alpha1
+    kind: PostgreSQLInstance
+  writeConnectionSecretsToNamespace: crossplane-system
+  patchSets:
+    - name: common-labels
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: metadata.labels
+          toFieldPath: metadata.labels
+          policy:
+            mergeOptions:
+              keepMapValues: true
+    - name: tier-settings
+      patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.tier
+          toFieldPath: spec.forProvider.instanceClass
+          transforms:
+            - type: map
+              map:
+                development: db.t3.micro
+                staging: db.t3.small
+                production: db.r6g.large
+  resources:
+    - name: rds-instance
+      base:
+        apiVersion: rds.aws.upbound.io/v1beta1
+        kind: Instance
+        spec:
+          forProvider:
+            engine: postgres
+            publiclyAccessible: false
+            storageEncrypted: true
+            autoMinorVersionUpgrade: true
+            deletionProtection: false
+            skipFinalSnapshot: true
+            vpcSecurityGroupIdSelector:
+              matchLabels:
+                platform.io/resource: database-sg
+            dbSubnetGroupNameSelector:
+              matchLabels:
+                platform.io/resource: database-subnet
+          writeConnectionSecretToRef:
+            namespace: crossplane-system
+      patches:
+        - type: PatchSet
+          patchSetName: common-labels
+        - type: PatchSet
+          patchSetName: tier-settings
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.storageGB
+          toFieldPath: spec.forProvider.allocatedStorage
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.version
+          toFieldPath: spec.forProvider.engineVersion
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.parameters.enableBackups
+          toFieldPath: spec.forProvider.backupRetentionPeriod
+          transforms:
+            - type: map
+              map:
+                "true": 7
+                "false": 0
+        - type: ToCompositeFieldPath
+          fromFieldPath: status.atProvider.endpoint
+          toFieldPath: status.endpoint
+        - type: ToCompositeFieldPath
+          fromFieldPath: status.atProvider.port
+          toFieldPath: status.port
+      connectionDetails:
+        - name: endpoint
+          fromFieldPath: status.atProvider.endpoint
+        - name: port
+          fromFieldPath: status.atProvider.port
+        - name: username
+          fromFieldPath: spec.forProvider.username
+        - name: password
+          fromConnectionSecretKey: attribute.password

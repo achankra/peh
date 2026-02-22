@@ -1,0 +1,150 @@
+# Chapter 12: Budget Guardrails - Resource Quotas and Limit Ranges
+# ================================================================
+# Kubernetes ResourceQuotas and LimitRanges for cost governance.
+# Defines tiered resource budgets for dev, staging, and production.
+#
+# Usage:
+#   kubectl apply -f budget-guardrails.yaml -n <namespace>
+#
+# Or apply specific tier:
+#   kubectl apply -f budget-guardrails.yaml -l tier=dev
+
+---
+# ============================================================
+# DEVELOPMENT TIER - Minimal resources, tight limits
+# ============================================================
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: dev-budget-quota
+  labels:
+    tier: dev
+    app.kubernetes.io/managed-by: platform-team
+spec:
+  hard:
+    requests.cpu: "4"          # 4 CPU cores total for namespace
+    requests.memory: 8Gi       # 8 GB memory total
+    limits.cpu: "8"            # Max 8 CPU cores
+    limits.memory: 16Gi        # Max 16 GB memory
+    pods: "20"                 # Max 20 pods
+    services: "10"             # Max 10 services
+    persistentvolumeclaims: "5"  # Max 5 PVCs
+    requests.storage: 50Gi     # Max 50 GB storage
+
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: dev-container-limits
+  labels:
+    tier: dev
+spec:
+  limits:
+  - type: Container
+    default:                   # Default limits if not specified
+      cpu: 200m
+      memory: 256Mi
+    defaultRequest:            # Default requests if not specified
+      cpu: 50m
+      memory: 64Mi
+    max:                       # Maximum any container can request
+      cpu: "1"
+      memory: 1Gi
+    min:                       # Minimum (prevents trivially small pods)
+      cpu: 10m
+      memory: 16Mi
+
+---
+# ============================================================
+# STAGING TIER - Moderate resources, mirrors prod ratios
+# ============================================================
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: staging-budget-quota
+  labels:
+    tier: staging
+    app.kubernetes.io/managed-by: platform-team
+spec:
+  hard:
+    requests.cpu: "16"
+    requests.memory: 32Gi
+    limits.cpu: "32"
+    limits.memory: 64Gi
+    pods: "50"
+    services: "20"
+    persistentvolumeclaims: "10"
+    requests.storage: 200Gi
+
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: staging-container-limits
+  labels:
+    tier: staging
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: 500m
+      memory: 512Mi
+    defaultRequest:
+      cpu: 100m
+      memory: 128Mi
+    max:
+      cpu: "4"
+      memory: 4Gi
+    min:
+      cpu: 10m
+      memory: 16Mi
+
+---
+# ============================================================
+# PRODUCTION TIER - Full resources with safety margins
+# ============================================================
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: prod-budget-quota
+  labels:
+    tier: prod
+    app.kubernetes.io/managed-by: platform-team
+spec:
+  hard:
+    requests.cpu: "64"
+    requests.memory: 128Gi
+    limits.cpu: "128"
+    limits.memory: 256Gi
+    pods: "200"
+    services: "50"
+    persistentvolumeclaims: "30"
+    requests.storage: 1Ti
+
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: prod-container-limits
+  labels:
+    tier: prod
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "1"
+      memory: 1Gi
+    defaultRequest:
+      cpu: 250m
+      memory: 256Mi
+    max:
+      cpu: "8"
+      memory: 16Gi
+    min:
+      cpu: 50m
+      memory: 64Mi
+  - type: PersistentVolumeClaim
+    max:
+      storage: 100Gi
+    min:
+      storage: 1Gi

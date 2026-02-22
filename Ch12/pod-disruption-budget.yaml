@@ -1,0 +1,144 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: critical-service-pdb
+  namespace: default
+spec:
+  # Require at least 1 pod to remain available
+  minAvailable: 1
+  
+  # Select pods matching the app label
+  selector:
+    matchLabels:
+      app: critical-service
+      tier: backend
+  
+  # Allow disruption only when all other pods are available
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  
+  # Policies for different disruption types
+  disruptionBudgetPolicy:
+    - type: node-drain
+    - type: node-failure
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: standard-service-pdb
+  namespace: default
+spec:
+  # Allow up to 25% of pods to be unavailable
+  maxUnavailable: "25%"
+  
+  # Select pods matching the app label
+  selector:
+    matchLabels:
+      app: standard-service
+      tier: backend
+  
+  # Eviction policy configuration
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend-pdb
+  namespace: default
+spec:
+  # Minimum pods available for frontend
+  minAvailable: 2
+  
+  # Select frontend pods
+  selector:
+    matchLabels:
+      app: frontend
+      tier: web
+  
+  # Unhealthy pod eviction settings
+  unhealthyPodEvictionPolicy: IfHealthyBudget
+
+---
+# Example Deployment with PDB considerations
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: critical-service
+  namespace: default
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0  # Respect PDB
+  
+  selector:
+    matchLabels:
+      app: critical-service
+      tier: backend
+  
+  template:
+    metadata:
+      labels:
+        app: critical-service
+        tier: backend
+    spec:
+      # Pod anti-affinity for distribution
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - critical-service
+                topologyKey: kubernetes.io/hostname
+      
+      # Graceful termination
+      terminationGracePeriodSeconds: 30
+      
+      # Pod disruption budget acknowledgment
+      containers:
+        - name: app
+          image: myapp:1.0
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 15"]
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: standard-service
+  namespace: default
+spec:
+  replicas: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 1  # Respect PDB's 25%
+  
+  selector:
+    matchLabels:
+      app: standard-service
+      tier: backend
+  
+  template:
+    metadata:
+      labels:
+        app: standard-service
+        tier: backend
+    spec:
+      # Graceful termination
+      terminationGracePeriodSeconds: 20
+      
+      containers:
+        - name: app
+          image: myapp:1.0

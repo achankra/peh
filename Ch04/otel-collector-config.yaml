@@ -1,0 +1,148 @@
+# OpenTelemetry Collector Configuration
+# Handles receipt and processing of metrics, logs, and traces from applications
+# and exports them to backend storage systems (Prometheus, Loki, Jaeger)
+
+receivers:
+  # OTLP receiver for traces and metrics from instrumented applications
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Prometheus receiver for scraping metrics from endpoints
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['localhost:8888']
+        - job_name: 'kubernetes-pods'
+          scrape_interval: 30s
+          kubernetes_sd_configs:
+            - role: pod
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+              action: keep
+              regex: "true"
+            - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+              action: replace
+              target_label: __metrics_path__
+              regex: (.+)
+
+  # Syslog receiver for log data
+  syslog:
+    protocol_config:
+      protocol: rfc5424
+    listen_address: 0.0.0.0:514
+
+  # Jaeger receiver for span data from Jaeger clients
+  jaeger:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:14250
+      thrift_http:
+        endpoint: 0.0.0.0:14268
+
+processors:
+  # Batch processor: groups telemetry into batches for efficiency
+  batch:
+    send_batch_size: 1024
+    timeout: 10s
+    send_batch_max_size: 2048
+
+  # Memory limiter: prevents OOM by limiting memory usage
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Attributes processor: adds resource attributes to spans
+  attributes:
+    actions:
+      - key: deployment.environment
+        value: production
+        action: upsert
+      - key: service.namespace
+        from_attribute: namespace
+        action: insert
+
+  # Resource detection: adds cloud/K8s resource attributes
+  resourcedetection:
+    detectors: [gcp, aws, azure, k8s, docker, env, system]
+    timeout: 5s
+
+  # Sampling processor: reduces volume of spans (1% sample rate in production)
+  sampling:
+    sampling_percentage: 100  # Change to 1 for production
+
+exporters:
+  # Prometheus exporter: push metrics to Prometheus
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: "otel"
+
+  # Otlp exporter: send to external OTLP backend
+  otlp:
+    endpoint: jaeger-backend:4317
+    tls:
+      insecure: true
+
+  # Loki exporter: send logs to Grafana Loki
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    labels:
+      resource:
+        - service.name
+        - service.namespace
+
+  # Jaeger exporter: send traces to Jaeger
+  jaeger:
+    endpoint: jaeger-backend:14250
+    tls:
+      insecure: true
+
+  # Debug exporter: logs all telemetry (remove in production)
+  logging:
+    loglevel: debug
+
+extensions:
+  # Health check extension for k8s readiness/liveness probes
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+  # Performance profiler for debugging collector performance
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+service:
+  extensions: [health_check, pprof]
+  pipelines:
+    # Metrics pipeline: receive from OTLP and Prometheus, export to Prometheus
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, batch, attributes, resourcedetection]
+      exporters: [prometheus, logging]
+
+    # Traces pipeline: receive from OTLP and Jaeger, export to Jaeger
+    traces:
+      receivers: [otlp, jaeger]
+      processors: [memory_limiter, batch, attributes, resourcedetection]
+      exporters: [jaeger, logging]
+
+    # Logs pipeline: receive from syslog, export to Loki
+    logs:
+      receivers: [syslog]
+      processors: [memory_limiter, batch, attributes, resourcedetection]
+      exporters: [loki, logging]
+
+  # Telemetry for the collector itself
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed
+      enabled: true
+

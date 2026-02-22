@@ -1,0 +1,26 @@
+# Chapter 12: Kyverno ClusterPolicy for Cost Governance
+# Listing 12.11 - Policy to require resource requests on all pods
+# Kyverno enforces that every container specifies CPU and memory requests,
+# preventing "unlimited" resource consumption that drives cost overruns.
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-requests
+spec:
+  validationFailureAction: audit
+  rules:
+    - name: validate-requests
+      match:
+        resources:
+          kinds:
+            - Pod
+      validate:
+        message: "CPU and memory requests are required"
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  requests:
+                    memory: "?*"
+                    cpu: "?*"

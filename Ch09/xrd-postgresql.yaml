@@ -1,0 +1,66 @@
+# xrd-postgresql.yaml
+# Composite Resource Definition for PostgreSQL databases
+# This defines the schema that developers will interact with when requesting databases
+
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: postgresqlinstances.database.platform.io
+spec:
+  group: database.platform.io
+  names:
+    kind: PostgreSQLInstance
+    plural: postgresqlinstances
+  claimNames:
+    kind: PostgreSQLClaim
+    plural: postgresqlclaims
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                parameters:
+                  type: object
+                  properties:
+                    storageGB:
+                      type: integer
+                      description: Storage size in GB
+                      default: 20
+                      minimum: 10
+                      maximum: 1000
+                    version:
+                      type: string
+                      description: PostgreSQL version
+                      default: "15"
+                      enum: ["13", "14", "15", "16"]
+                    tier:
+                      type: string
+                      description: Performance tier
+                      default: development
+                      enum: [development, staging, production]
+                    enableBackups:
+                      type: boolean
+                      description: Enable automated backups
+                      default: true
+                  required:
+                    - tier
+              required:
+                - parameters
+            status:
+              type: object
+              properties:
+                connectionSecret:
+                  type: string
+                  description: Name of secret containing connection details
+                endpoint:
+                  type: string
+                  description: Database endpoint
+                port:
+                  type: integer
+                  description: Database port

@@ -1,0 +1,77 @@
+# Chapter 6: Backstage Production Configuration
+# ===============================================
+# app-config.production.yaml for Backstage with Keycloak SSO,
+# GitHub catalog discovery, and proxy settings.
+#
+# Usage: Set environment variables, then:
+#   yarn start --config app-config.yaml --config app-config.production.yaml
+app:
+  title: NewTech Developer Portal
+  baseUrl: https://portal.company.com
+
+organization:
+  name: NewTech
+
+backend:
+  baseUrl: https://portal.company.com
+  listen:
+    port: 7007
+  database:
+    client: pg
+    connection:
+      host: ${POSTGRES_HOST}
+      port: ${POSTGRES_PORT}
+      user: ${POSTGRES_USER}
+      password: ${POSTGRES_PASSWORD}
+
+# --- Authentication: Keycloak/OIDC ---
+auth:
+  environment: production
+  providers:
+    keycloak:
+      production:
+        metadataUrl: ${KEYCLOAK_METADATA_URL}
+        clientId: ${KEYCLOAK_CLIENT_ID}
+        clientSecret: ${KEYCLOAK_CLIENT_SECRET}
+        prompt: auto
+
+# --- Software Catalog ---
+catalog:
+  rules:
+    - allow: [Component, System, API, Resource, Location, Template]
+  locations:
+    # GitHub org-wide discovery
+    - type: github-discovery
+      target: https://github.com/platform-org
+    # Explicit locations for platform services
+    - type: url
+      target: https://github.com/platform-org/demo-app/blob/main/catalog-info.yaml
+  providers:
+    github:
+      platformOrg:
+        organization: platform-org
+        catalogPath: /catalog-info.yaml
+        schedule:
+          frequency: { minutes: 30 }
+          timeout: { minutes: 3 }
+
+# --- TechDocs ---
+techdocs:
+  builder: external
+  publisher:
+    type: awsS3
+    awsS3:
+      bucketName: ${TECHDOCS_BUCKET}
+      region: ${AWS_REGION}
+
+# --- Proxy for internal services ---
+proxy:
+  endpoints:
+    /argocd/api:
+      target: https://argocd.platform.company.com/api/v1
+      headers:
+        Cookie: argocd.token=${ARGOCD_TOKEN}
+    /grafana/api:
+      target: https://grafana.platform.company.com
+      headers:
+        Authorization: Bearer ${GRAFANA_TOKEN}

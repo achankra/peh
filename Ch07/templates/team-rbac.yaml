@@ -1,0 +1,35 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: team-role
+  namespace: team-namespace-placeholder
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/logs", "pods/exec"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: team-role-binding
+  namespace: team-namespace-placeholder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: team-role
+subjects:
+  - kind: Group
+    name: team-members@company.com
+    apiGroup: rbac.authorization.k8s.io

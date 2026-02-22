@@ -1,0 +1,169 @@
+# Example Backstage Catalog Entity
+# This file demonstrates how to register a component in the Backstage service catalog
+# Place this file in your Git repository (typically at the root or in a .backstage/ directory)
+
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: api-gateway
+  namespace: default
+  title: API Gateway Service
+  description: Central API gateway for microservice communication
+  # Labels help organize and query entities
+  labels:
+    team: platform-engineering
+    technology-domain: infrastructure
+    criticality: critical
+  # Links to documentation and related resources
+  links:
+    - url: https://github.com/myorg/api-gateway
+      title: Source Repository
+      icon: github
+    - url: https://api-gateway.example.com/docs
+      title: API Documentation
+      icon: docs
+  # Annotations for integrations (GitHub, Jira, etc.)
+  annotations:
+    github.com/project-slug: myorg/api-gateway
+    jira.com/project-key: PLATFORM
+    backstage.io/kubernetes-id: api-gateway
+    backstage.io/techdocs-ref: dir:.
+
+spec:
+  # Type of component: service, library, website, etc.
+  type: service
+  
+  # Lifecycle stage: experimental, development, production, mature, deprecated
+  lifecycle: production
+  
+  # Owner of this component
+  owner: platform-team
+  
+  # System this component belongs to
+  system: platform-services
+  
+  # Defining relationships to other entities
+  providesApis:
+    - gateway-api
+  consumesApis:
+    - user-service-api
+    - payment-service-api
+  dependsOn:
+    - resource:postgres-primary
+    - resource:redis-cache
+  
+  # Profile information
+  profile:
+    displayName: API Gateway
+    description: The central hub for all API traffic routing and management
+
+---
+# API Entity - defines the API provided by the component
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: gateway-api
+  namespace: default
+  title: Gateway API
+  description: REST API for API Gateway service
+
+spec:
+  type: openapi
+  lifecycle: production
+  owner: platform-team
+  system: platform-services
+  definition: |
+    openapi: 3.0.0
+    info:
+      title: Gateway API
+      version: 1.0.0
+    paths:
+      /routes:
+        get:
+          summary: List all routes
+          responses:
+            '200':
+              description: Routes found
+      /health:
+        get:
+          summary: Health check endpoint
+          responses:
+            '200':
+              description: Gateway is healthy
+
+---
+# Resource Entity - defines infrastructure/data resources
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: postgres-primary
+  namespace: default
+  title: PostgreSQL Primary Database
+  description: Primary PostgreSQL database for API Gateway
+
+spec:
+  type: database
+  lifecycle: production
+  owner: platform-team
+  system: platform-services
+
+---
+# User Entity - defines team members
+apiVersion: backstage.io/v1alpha1
+kind: User
+metadata:
+  name: alice.smith
+  title: Alice Smith
+  description: Platform Engineering Team Lead
+
+spec:
+  profile:
+    displayName: Alice Smith
+    email: alice.smith@example.com
+    picture: https://example.com/photos/alice.jpg
+  memberOf:
+    - platform-team
+
+---
+# Group Entity - defines teams/organizations
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: platform-team
+  title: Platform Engineering Team
+  description: Team responsible for platform infrastructure and developer tools
+
+spec:
+  profile:
+    displayName: Platform Engineering
+    email: platform@example.com
+    picture: https://example.com/teams/platform.jpg
+  members:
+    - alice.smith
+  parent: engineering-org
+
+---
+# System Entity - defines a system/domain
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: platform-services
+  title: Platform Services System
+  description: Core platform services and infrastructure components
+
+spec:
+  owner: platform-team
+  domain: infrastructure
+
+---
+# Domain Entity - defines a business/technical domain
+apiVersion: backstage.io/v1alpha1
+kind: Domain
+metadata:
+  name: infrastructure
+  title: Infrastructure Domain
+  description: Infrastructure and platform engineering domain
+
+spec:
+  owner: platform-team
+
