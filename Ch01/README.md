@@ -189,7 +189,7 @@ nano platform-config.yaml
 **Example modification:**
 ```yaml
 platform:
-  name: "Acme Corp Developer Platform"
+  name: "Platformetrics Developer Platform"
   owner-team: "DevEx Engineering"
   # ... rest of config
 ```
