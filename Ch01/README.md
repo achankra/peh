@@ -675,10 +675,11 @@ Ch1/code/
 ## Further Reading
 
 For detailed explanations of all concepts in this chapter, refer to:
-- **Chapter 1: Laying the Groundwork** in "The Platform Engineer's Handbook"
+- **Chapter 1: Laying the Groundwork** in "[Platform Engineer's Handbook](https://www.packtpub.com/en-us/product/the-platform-engineers-handbook-9781806380121)"
 - The accompanying documentation in the manuscript
 
 For additional resources:
-- **Team Topologies**: Read "Team Topologies: Organizing Business and Technology Teams for Fast Flow" by Matthew Skelton and Manuel Pais
-- **Platform Engineering**: See "Continuous Delivery" by Jez Humble and David Farley for release workflow best practices
-- **Site Reliability Engineering**: Refer to "The Site Reliability Engineering Book" for observability and security patterns
+- **Platform Engineering**:Read the most detailed treatment on Platform Engineering [Effective Platform Engineering](https://effectiveplatformengineering.com)
+- **Team Topologies**: Read "[Team Topologies: Organizing Business and Technology Teams for Fast Flow](https://teamtopologies.com)" by Matthew Skelton and Manuel Pais
+- **CI/CD**: See "[Continuous Delivery](https://www.amazon.com/Continuous-Delivery-Deployment-Automation-Addison-Wesley/dp/0321601912)" by Jez Humble and David Farley for release workflow best practices
+- **Site Reliability Engineering**: Refer to "[The Site Reliability Engineering Book](https://sre.google/workbook/table-of-contents/)" for observability and security patterns

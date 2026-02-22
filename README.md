@@ -204,8 +204,14 @@ Each chapter folder contains its own `README.md` with full prerequisites, step-b
 
 ---
 
+## Get the book
+
+[Platform Engineer's Handbook](https://www.packtpub.com/en-us/product/the-platform-engineers-handbook-9781806380121)
+
 ## Companion Website
 
 Additional resources, videos, case studies, and interactive tools are available at:
 
 **https://peh-packt.platformetrics.com/**
+
+
