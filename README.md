@@ -184,7 +184,6 @@ Everything else (Prometheus, Grafana, Gatekeeper, cert-manager, Crossplane, Chao
 
 ```
 ├── README.md                  ← You are here
-├── Appendix-A-Installation-Instructions.docx
 ├── Ch1/code/                  ← Laying the Groundwork
 ├── Ch2/code/                  ← Scalable Platform Runtime
 ├── Ch3/code/                  ← Securing Platform Access
