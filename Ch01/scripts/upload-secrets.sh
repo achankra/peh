@@ -5,43 +5,68 @@
 
 set -euo pipefail
 
-# Load environment variables from .env file
+# ── Load environment variables from .env file ───────────────────────
 # Expected variables: BW_CLIENTID, BW_CLIENTSECRET, BW_PASSWORD
-if [ -f .env ]; then
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$SCRIPT_DIR/../.env"
+
+if [ -f "$ENV_FILE" ]; then
+    set -a          # auto-export every variable that gets set
+    source "$ENV_FILE"
+    set +a
+elif [ -f .env ]; then
+    set -a
     source .env
+    set +a
 else
-    echo "Error: .env file not found. Please create it from .env_example"
+    echo "Error: .env file not found."
+    echo "Create it from .env_example:  cp .env_example .env"
     exit 1
 fi
 
-# Verify required environment variables are set
+# ── Verify required environment variables ────────────────────────────
 if [ -z "${BW_CLIENTID:-}" ] || [ -z "${BW_CLIENTSECRET:-}" ] || [ -z "${BW_PASSWORD:-}" ]; then
     echo "Error: Required Bitwarden credentials not set in .env"
+    echo "Need: BW_CLIENTID, BW_CLIENTSECRET, BW_PASSWORD"
     exit 1
 fi
 
+# ── Authenticate ─────────────────────────────────────────────────────
 echo "Logging into Bitwarden using API credentials..."
-# Authenticate with Bitwarden using client ID and secret
-bw login --apikey
+bw login --apikey 2>/dev/null || echo "(Already logged in)"
 
 echo "Unlocking Bitwarden vault..."
-# Unlock the vault using the master password
-# This creates a session token for subsequent commands
 export BW_SESSION=$(bw unlock --passwordenv BW_PASSWORD --raw)
 
-echo "Creating GitHub Secrets item in Bitwarden..."
-# Read the JSON file, base64 encode it, and create a new item in Bitwarden
-# This securely stores the secrets for retrieval by CI/CD pipelines
-SECRETS_JSON=$(cat secrets-setup/github_secrets.json)
-bw create item "$SECRETS_JSON"
+if [ -z "$BW_SESSION" ]; then
+    echo "Error: Failed to unlock vault. Check your BW_PASSWORD."
+    exit 1
+fi
 
+# ── Create the GitHub Secrets item ───────────────────────────────────
+echo "Creating GitHub Secrets item in Bitwarden..."
+
+# Locate the JSON template
+if [ -f "$SCRIPT_DIR/../secrets-setup/github_secrets.json" ]; then
+    JSON_FILE="$SCRIPT_DIR/../secrets-setup/github_secrets.json"
+elif [ -f "secrets-setup/github_secrets.json" ]; then
+    JSON_FILE="secrets-setup/github_secrets.json"
+else
+    echo "Error: secrets-setup/github_secrets.json not found"
+    exit 1
+fi
+
+# bw create item expects base64-encoded JSON
+ENCODED=$(cat "$JSON_FILE" | bw encode)
+bw create item "$ENCODED"
+
+# ── Sync and lock ────────────────────────────────────────────────────
 echo "Syncing Bitwarden vault..."
-# Synchronize local Bitwarden cache with the server
 bw sync
 
 echo "Locking Bitwarden vault..."
-# Lock the vault to invalidate the session token
 bw lock
 
+echo ""
 echo "Successfully uploaded secrets to Bitwarden"
 exit 0

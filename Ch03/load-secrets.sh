@@ -26,10 +26,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Try local copy first, then fall back to Ch1
 if [ -f "$SCRIPT_DIR/scripts/bw-helper.sh" ]; then
     source "$SCRIPT_DIR/scripts/bw-helper.sh"
-elif [ -f "$SCRIPT_DIR/../../Ch1/code/scripts/bw-helper.sh" ]; then
-    source "$SCRIPT_DIR/../../Ch1/code/scripts/bw-helper.sh"
+elif [ -f "$SCRIPT_DIR/../../Ch01/scripts/bw-helper.sh" ]; then
+    source "$SCRIPT_DIR/../../Ch01/scripts/bw-helper.sh"
 else
-    echo "Error: bw-helper.sh not found. Copy it from Ch1/code/scripts/"
+    echo "Error: bw-helper.sh not found. Copy it from Ch01/scripts/"
     exit 1
 fi
 

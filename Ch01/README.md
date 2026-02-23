@@ -189,7 +189,7 @@ nano platform-config.yaml
 **Example modification:**
 ```yaml
 platform:
-  name: "Platformetrics Developer Platform"
+  name: "Acme Corp Developer Platform"
   owner-team: "DevEx Engineering"
   # ... rest of config
 ```
@@ -403,7 +403,7 @@ The workflow implements a robust six-stage release process:
    - Uploads results to GitHub Security tab
 
 4. **Deploy to Staging Stage**
-   - Configures AWS credentials
+   - Sets up kubectl for cluster access
    - Deploys to staging environment (Kubernetes or Helm)
    - Performs health checks on deployment
    - Runs smoke tests against staging
@@ -413,7 +413,7 @@ The workflow implements a robust six-stage release process:
    - Provides change record for audit trail
 
 6. **Deploy to Production Stage**
-   - Configures AWS credentials
+   - Sets up kubectl for cluster access
    - Deploys to production environment
    - Verifies production deployment
    - Creates release tag and release notes
@@ -644,7 +644,7 @@ After working through this chapter's code:
 ## File Structure Summary
 
 ```
-Ch1/code/
+Ch01/
 ├── README.md                          # This file
 ├── platform-maturity-assessment.py    # Platform maturity evaluation tool
 ├── design-principles-checklist.py     # Design principles validator
@@ -675,11 +675,10 @@ Ch1/code/
 ## Further Reading
 
 For detailed explanations of all concepts in this chapter, refer to:
-- **Chapter 1: Laying the Groundwork** in "[Platform Engineer's Handbook](https://www.packtpub.com/en-us/product/the-platform-engineers-handbook-9781806380121)"
+- **Chapter 1: Laying the Groundwork** in "The Platform Engineer's Handbook"
 - The accompanying documentation in the manuscript
 
 For additional resources:
-- **Platform Engineering**:Read the most detailed treatment on Platform Engineering [Effective Platform Engineering](https://effectiveplatformengineering.com)
-- **Team Topologies**: Read "[Team Topologies: Organizing Business and Technology Teams for Fast Flow](https://teamtopologies.com)" by Matthew Skelton and Manuel Pais
-- **CI/CD**: See "[Continuous Delivery](https://www.amazon.com/Continuous-Delivery-Deployment-Automation-Addison-Wesley/dp/0321601912)" by Jez Humble and David Farley for release workflow best practices
-- **Site Reliability Engineering**: Refer to "[The Site Reliability Engineering Book](https://sre.google/workbook/table-of-contents/)" for observability and security patterns
+- **Team Topologies**: Read "Team Topologies: Organizing Business and Technology Teams for Fast Flow" by Matthew Skelton and Manuel Pais
+- **Platform Engineering**: See "Continuous Delivery" by Jez Humble and David Farley for release workflow best practices
+- **Site Reliability Engineering**: Refer to "The Site Reliability Engineering Book" for observability and security patterns

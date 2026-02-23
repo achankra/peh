@@ -1,0 +1,3 @@
+config:
+  cluster:name: platform-dev
+  cluster:kubernetesVersion: "1.27"

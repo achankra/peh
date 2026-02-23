@@ -1,0 +1,92 @@
+# CircleCI Configuration for Infrastructure Automation
+# This pipeline orchestrates Pulumi infrastructure deployments with preview/approval/apply workflow
+# Uses Pulumi and Python orbs for environment setup and automatic stack management
+
+version: 2.1
+
+orbs:
+  # Pulumi orb for infrastructure-as-code automation
+  pulumi: pulumi/pulumi@2.1.0
+  # Python orb for dependency management and runtime
+  python: circleci/python@3.1.0
+
+# Global context applied to all jobs
+# Contains credentials and environment variables needed for infrastructure deployment
+globals: &context
+  - PLATFORM_ADMIN
+
+# Filter patterns for selective job execution
+filter_definitions:
+  # Trigger on pushes to main branch (for preview/planning)
+  push_main: &push_main
+    filters:
+      branches:
+        only:
+          - main
+
+  # Trigger on git tags starting with v (for actual deployment)
+  tag_main: &tag_main
+    filters:
+      tags:
+        only: /^v.*/
+      branches:
+        ignore: /.*/
+
+jobs:
+  # Preview job: Shows what changes will be made without applying them
+  # Provides CI feedback on infrastructure changes before approval
+  pulumi-preview:
+    executor: pulumi/default
+    context: *context
+    steps:
+      - checkout
+      - python/install:
+          version: "3.10"
+      - pulumi/login
+      - pulumi/preview:
+          stack: main
+          args: "--color always --non-interactive"
+
+  # Manual approval step: Requires human approval before deployment
+  # Prevents accidental production changes
+  approve-deployment:
+    type: approval
+    requires:
+      - pulumi-preview
+
+  # Update/Deploy job: Applies infrastructure changes to production
+  # Only runs after explicit approval on version tags
+  pulumi-up:
+    executor: pulumi/default
+    context: *context
+    steps:
+      - checkout
+      - python/install:
+          version: "3.10"
+      - pulumi/login
+      - pulumi/up:
+          stack: main
+          args: "--color always --non-interactive"
+
+workflows:
+  # Preview workflow: Runs on every push to main
+  # Provides infrastructure impact analysis without making changes
+  preview:
+    jobs:
+      - pulumi-preview:
+          <<: *push_main
+
+  # Production deployment workflow: Runs on version tags
+  # Executes full preview -> approval -> deploy pipeline
+  update:
+    jobs:
+      - pulumi-preview:
+          <<: *tag_main
+      - approve-deployment:
+          <<: *tag_main
+          requires:
+            - pulumi-preview
+      - pulumi-up:
+          <<: *tag_main
+          requires:
+            - approve-deployment

@@ -1,0 +1,42 @@
+#!/bin/bash
+# Git commit message hook - Enforce conventional commits
+# This hook validates that commit messages follow the conventional commits format
+# which helps maintain consistent, semantic commit history for automated changelog generation
+# and better CI/CD integration.
+
+# Conventional commits pattern:
+# type(scope)?: description
+# where type is one of: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test
+
+COMMIT_MSG_FILE=$1
+COMMIT_EDITMSG=$(cat "$COMMIT_MSG_FILE")
+
+# Pattern for valid conventional commits
+# Matches: type(scope): message or type: message (scope is optional)
+# scope can contain lowercase letters, numbers, and hyphens
+PATTERN='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9-]+\))?!?: .+$'
+
+# Extract the first line of the commit message (ignore comments and empty lines)
+COMMIT_MSG=$(echo "$COMMIT_EDITMSG" | grep -v '^#' | head -1)
+
+# Validate commit message against pattern
+if ! [[ "$COMMIT_MSG" =~ $PATTERN ]]; then
+    echo "Error: Commit message does not follow conventional commits format"
+    echo ""
+    echo "Valid format: type(scope)?: description"
+    echo ""
+    echo "Allowed types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test"
+    echo ""
+    echo "Examples:"
+    echo "  feat(auth): add OAuth2 login support"
+    echo "  fix(database): resolve connection pool leak"
+    echo "  docs: update installation guide"
+    echo "  refactor(api): simplify endpoint handlers"
+    echo ""
+    echo "Your commit message:"
+    echo "  $COMMIT_MSG"
+    echo ""
+    exit 1
+fi
+
+exit 0
