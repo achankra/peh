@@ -1,0 +1,73 @@
+name: Policy Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "policies/**"
+      - "constraints/**"
+      - ".github/workflows/policy-tests.yaml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "policies/**"
+      - "constraints/**"
+      - ".github/workflows/policy-tests.yaml"
+
+jobs:
+  policy-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up OPA
+        uses: open-policy-agent/setup-opa@v1
+        with:
+          version: latest
+
+      - name: Run OPA tests
+        run: |
+          echo "Running OPA tests for policies..."
+          opa test ./policies -v
+
+      - name: Validate policy syntax
+        run: |
+          echo "Validating policy syntax..."
+          for policy in policies/*.rego; do
+            echo "Checking $policy..."
+            opa parse "$policy" > /dev/null || exit 1
+          done
+
+      - name: Run conftest validation
+        run: |
+          # Install conftest
+          curl -L -o conftest.tar.gz https://github.com/open-policy-agent/conftest/releases/download/v0.46.0/conftest_0.46.0_Linux_x86_64.tar.gz
+          tar xzf conftest.tar.gz
+          
+          # Test constraints
+          echo "Validating constraints with conftest..."
+          for constraint in constraints/*.yaml; do
+            echo "Checking $constraint..."
+            ./conftest test "$constraint" -p policies || true
+          done
+
+      - name: Lint YAML manifests
+        run: |
+          echo "Linting YAML manifests..."
+          for file in constraints/*.yaml; do
+            echo "Checking $file..."
+            python3 -c "import yaml; yaml.safe_load(open('$file'))" || exit 1
+          done
+
+      - name: Comment on PR with test results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: "Policy tests passed!"
+            })

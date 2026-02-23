@@ -1,0 +1,15 @@
+# Chapter 11: GitHub Actions Workflow for Policy Validation
+# Listing 11.8 - CI/CD pipeline integration for shift-left policy testing
+# Runs conftest against Kubernetes manifests on every pull request.
+
+name: Policy Validation
+on: [pull_request]
+jobs:
+  conftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: instrumenta/conftest-action@master
+        with:
+          files: manifests/
+          policy: policy/
