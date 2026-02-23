@@ -1,180 +1,163 @@
+# velero-storage-location.yaml
+# Backup storage locations for Velero using MinIO (S3-compatible)
+# Runs entirely inside the Kind cluster — no cloud provider required.
+#
+# Prerequisites:
+#   1. Install MinIO:  helm install minio minio/minio -n velero -f minio-values.yaml
+#   2. Create bucket:  mc alias set local http://minio.velero:9000 minioadmin minioadmin
+#                       mc mb local/velero-backups
+
+---
 apiVersion: velero.io/v1
 kind: BackupStorageLocation
 metadata:
-  name: aws-s3
+  name: default
   namespace: velero
 spec:
-  # Cloud provider type
+  # Use the AWS (S3-compatible) plugin — works with MinIO
   provider: aws
-  
-  # AWS S3 bucket configuration
+
+  # MinIO bucket configuration
   objectStorage:
-    bucket: my-cluster-backups-prod
+    bucket: velero-backups
     prefix: velero
-  
-  # AWS S3 specific settings
+
+  # MinIO-specific S3-compatible settings
   config:
-    # AWS region where bucket is located
+    # MinIO endpoint inside the cluster
+    s3Url: http://minio.velero.svc.cluster.local:9000
+
+    # Region is required by the plugin but arbitrary for MinIO
     region: us-east-1
-    
-    # S3 URL (optional, for S3-compatible services)
-    s3Url: https://s3.us-east-1.amazonaws.com
-    
-    # Use path-style S3 URLs (important for S3-compatible services)
-    s3ForcePathStyle: "false"
-    
-    # Server-side encryption
-    serverSideEncryption: "AES256"
-    
-    # Enable version control
-    publicUrl: "https://s3.us-east-1.amazonaws.com/my-cluster-backups-prod"
-    
-    # Kms key ID (for KMS encryption)
-    # kmsKeyId: "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
-    
-    # Use SSL/TLS
-    insecureSkipTLSVerify: "false"
-    
-    # S3 storage class
-    storageClass: "STANDARD_IA"
-  
-  # Access credentials (should be in IAM role or secret)
+
+    # Path-style required for MinIO (not virtual-hosted)
+    s3ForcePathStyle: "true"
+
+    # No TLS for local MinIO
+    insecureSkipTLSVerify: "true"
+
+    # Disable checksum validation (not needed for local)
+    checksumAlgorithm: ""
+
+  # Access credentials
   credential:
-    name: velero-secret
-    key: cloud-credentials
-  
+    name: velero-minio-credentials
+    key: cloud
+
   # Validation settings
   validationFrequency: 0h
   accessMode: ReadWrite
-  
+
   # Default backup location
   default: true
 
 ---
-apiVersion: velero.io/v1
-kind: BackupStorageLocation
-metadata:
-  name: aws-s3-archive
-  namespace: velero
-spec:
-  provider: aws
-  
-  objectStorage:
-    bucket: my-cluster-backups-archive
-    prefix: long-term
-  
-  config:
-    region: us-west-2
-    s3Url: https://s3.us-west-2.amazonaws.com
-    s3ForcePathStyle: "false"
-    serverSideEncryption: "AES256"
-    storageClass: "GLACIER"
-    
-    # Lifecycle policies for archival
-    transition:
-      days: 90
-      storage_class: "GLACIER"
-  
-  credential:
-    name: velero-secret
-    key: cloud-credentials-archive
-  
-  accessMode: ReadOnly
-  default: false
-
----
-apiVersion: velero.io/v1
-kind: BackupStorageLocation
-metadata:
-  name: azure-blob
-  namespace: velero
-spec:
-  provider: azure
-  
-  objectStorage:
-    bucket: velero-backups
-    prefix: azure
-  
-  config:
-    # Azure configuration
-    subscriptionId: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-    tenantId: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-    resourceGroup: "my-resource-group"
-    storageAccount: "mybackupaccount"
-    storageAccountKeyEnvVar: "AZURE_STORAGE_ACCOUNT_ACCESS_KEY"
-  
-  credential:
-    name: velero-secret
-    key: cloud-credentials-azure
-  
-  accessMode: ReadWrite
-
----
-apiVersion: velero.io/v1
-kind: BackupStorageLocation
-metadata:
-  name: gcs-backup
-  namespace: velero
-spec:
-  provider: gcp
-  
-  objectStorage:
-    bucket: my-cluster-backups-gcp
-    prefix: velero
-  
-  config:
-    # GCP project ID
-    projectId: "my-gcp-project"
-    
-    # Folder path in bucket
-    folder: "velero-backups"
-  
-  credential:
-    name: velero-secret
-    key: cloud-credentials-gcp
-  
-  accessMode: ReadWrite
-
----
+# Credentials secret for MinIO access
 apiVersion: v1
 kind: Secret
 metadata:
-  name: velero-secret
+  name: velero-minio-credentials
   namespace: velero
 type: Opaque
 stringData:
-  # AWS credentials (base64 encoded in actual use)
-  cloud-credentials: |
+  cloud: |
     [default]
-    aws_access_key_id=YOUR_AWS_ACCESS_KEY_ID
-    aws_secret_access_key=YOUR_AWS_SECRET_ACCESS_KEY
-  
-  # AWS credentials for archive
-  cloud-credentials-archive: |
-    [default]
-    aws_access_key_id=YOUR_ARCHIVE_AWS_ACCESS_KEY_ID
-    aws_secret_access_key=YOUR_ARCHIVE_AWS_SECRET_ACCESS_KEY
-  
-  # Azure credentials
-  cloud-credentials-azure: |
-    AZURE_SUBSCRIPTION_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-    AZURE_TENANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-    AZURE_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-    AZURE_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    AZURE_RESOURCE_GROUP=my-resource-group
-    AZURE_STORAGE_ACCOUNT_ID=mybackupaccount
-    AZURE_STORAGE_ACCOUNT_ACCESS_KEY=YOUR_AZURE_STORAGE_KEY
-  
-  # GCP credentials
-  cloud-credentials-gcp: |
-    {
-      "type": "service_account",
-      "project_id": "my-gcp-project",
-      "private_key_id": "key-id",
-      "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
-      "client_email": "velero@my-gcp-project.iam.gserviceaccount.com",
-      "client_id": "1234567890",
-      "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-      "token_uri": "https://oauth2.googleapis.com/token",
-      "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs"
-    }
+    aws_access_key_id=minioadmin
+    aws_secret_access_key=minioadmin
+
+---
+# MinIO deployment for local object storage
+# Alternative: use the MinIO Helm chart for a fuller deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: velero
+  labels:
+    app: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          command:
+            - minio
+            - server
+            - /data
+            - --console-address
+            - ":9001"
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          env:
+            - name: MINIO_ROOT_USER
+              value: minioadmin
+            - name: MINIO_ROOT_PASSWORD
+              value: minioadmin
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: velero
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9000
+      targetPort: 9000
+      name: api
+    - port: 9001
+      targetPort: 9001
+      name: console
+  selector:
+    app: minio
+
+---
+# Job to create the velero-backups bucket on MinIO startup
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-setup
+  namespace: velero
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Wait for MinIO to be ready
+              until mc alias set local http://minio.velero.svc.cluster.local:9000 minioadmin minioadmin; do
+                echo "Waiting for MinIO..."
+                sleep 2
+              done
+              # Create the backup bucket
+              mc mb --ignore-existing local/velero-backups
+              echo "Bucket 'velero-backups' is ready"

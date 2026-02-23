@@ -6,7 +6,7 @@ metadata:
 spec:
   # Schedule daily backup at 2:00 AM UTC
   schedule: "0 2 * * *"
-  
+
   # Template for backup configuration
   template:
     # Include specific namespaces
@@ -14,22 +14,19 @@ spec:
       - team-alpha
       - team-beta
       - production
-    
+
     # Exclude system namespaces
     excludedNamespaces:
       - kube-system
       - kube-public
       - velero
-    
-    # Storage location for backup
-    storageLocation: aws-s3
-    
-    # Snapshot location for volume snapshots
-    volumeSnapshotLocation: aws-ebs
-    
+
+    # Storage location — uses MinIO (default BSL)
+    storageLocation: default
+
     # Include cluster resources
     includeClusterResources: true
-    
+
     # Include namespace-scoped resources
     includedNamespaceScopedResources:
       - "pods"
@@ -40,10 +37,10 @@ spec:
       - "configmaps"
       - "secrets"
       - "services"
-    
+
     # TTL for backup retention (7 days = 168 hours)
     ttl: 168h
-    
+
     # Backup hooks for pre-backup and post-backup operations
     hooks:
       resources:
@@ -69,7 +66,7 @@ spec:
                     sleep 5
                     echo "Database quiesce complete"
                 timeout: 5m
-        
+
         # Post-backup hook: resume operations
         - name: db-resume
           includedNamespaces:
@@ -90,20 +87,19 @@ spec:
                     # Resume normal operations
                     echo "Database is operational"
                 timeout: 2m
-    
+
     # Snapshot settings for persistent volumes
-    snapshotVolumes: true
-    snapshotMoveData: false
-    
+    snapshotVolumes: false
+
     # Metadata options
     labels:
       schedule-type: daily
       backup-retention: "7days"
       backup-trigger: "schedule"
-    
+
     # CSI snapshot configuration
     csiSnapshotTimeout: 10m
-    
+
     # Partial backups allowed
     orderByClusterVersion: false
 
@@ -116,21 +112,22 @@ metadata:
 spec:
   # Schedule hourly backup for critical namespaces
   schedule: "0 * * * *"
-  
+
   template:
     includedNamespaces:
       - production
-    
+
     excludedNamespaces:
       - kube-system
       - kube-public
       - velero
-    
-    storageLocation: aws-s3
+
+    # Storage location — uses MinIO (default BSL)
+    storageLocation: default
     ttl: 72h  # Keep hourly backups for 3 days
-    
-    snapshotVolumes: true
-    
+
+    snapshotVolumes: false
+
     labels:
       schedule-type: hourly
       backup-retention: "3days"

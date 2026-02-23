@@ -161,26 +161,24 @@ security:
 
 # Infrastructure
 infrastructure:
-  primary-cloud: "AWS"
-  regions:
-    - "us-east-1"
-    - "eu-west-1"
-  
+  primary-runtime: "Kind"
+  environment: "local"
+
   kubernetes:
     version: "1.28"
-    distribution: "EKS"
+    distribution: "Kind"
     namespaces:
       - "platform"
       - "observability"
       - "security"
       - "applications"
-  
+
   databases:
     primary: "PostgreSQL"
     cache: "Redis"
     message-queue: "Apache Kafka"
-  
-  container-registry: "Amazon ECR"
+
+  container-registry: "docker.io"
 
 # Observability
 observability:

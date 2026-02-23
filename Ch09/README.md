@@ -19,14 +19,14 @@ This directory contains all code listings and exercises from Chapter 9, organize
 
 | File | Listing | Section | Purpose |
 |------|---------|---------|---------|
-| `crossplane-providers.yaml` | Listing 9.1 | "Infrastructure Blueprints" | Provider configuration for AWS and Kubernetes providers. Includes AWS provider setup with resource limits and Kubernetes provider for local development testing. |
+| `crossplane-providers.yaml` | Listing 9.1 | "Infrastructure Blueprints" | Provider configuration for Kubernetes and Helm providers. Runs entirely on the local Kind cluster — no cloud credentials required. |
 
 ### Composite Resource Definitions (XRDs) & Infrastructure Blueprints
 
 | File | Listing | Section | Purpose |
 |------|---------|---------|---------|
 | `xrd-postgresql.yaml` | Listing 9.2 | "Designing Composite Resources" | PostgreSQL XRD that defines the schema developers interact with when requesting databases. Specifies parameters (storageGB, version, tier, enableBackups) with defaults and validation rules. |
-| `composition-postgresql.yaml` | Listing 9.3 | "Designing Composite Resources" | Crossplane composition that implements the PostgreSQL XRD interface. Maps high-level claims to fully configured AWS RDS resources with tier-specific settings and patch sets. |
+| `composition-postgresql.yaml` | Listing 9.3 | "Designing Composite Resources" | Crossplane composition that implements the PostgreSQL XRD interface. Deploys PostgreSQL as a Deployment inside the Kind cluster using the Kubernetes provider, with tier-specific resource settings and patch sets. |
 | `xrd-gpu-nodepool.yaml` | Listing 9.6 | "Enabling Innovation Beyond the Platform" | XRD for GPU node pools enabling ML teams to request GPU resources with governance controls. Defines GPU types, node count, spot instance options, and scheduling windows. |
 
 ### Governance & Enforcement
@@ -70,7 +70,7 @@ This directory contains all code listings and exercises from Chapter 9, organize
 
 | File | Listing | Section | Purpose |
 |------|---------|---------|---------|
-| `load-secrets.sh` | N/A | Secrets Management (cross-chapter) | Retrieves AWS credentials from Bitwarden vault and optionally creates the `aws-credentials` Kubernetes Secret for Crossplane. Exports `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_DEFAULT_REGION`. Run with `--create-k8s` to also create the Kubernetes secret. |
+| `load-secrets.sh` | N/A | Secrets Management (cross-chapter) | Retrieves database credentials from Bitwarden vault and optionally creates the `db-credentials` Kubernetes Secret for Crossplane. Exports `POSTGRES_PASSWORD`. Run with `--create-k8s` to also create the Kubernetes secret. |
 
 ## Prerequisites
 
@@ -98,19 +98,15 @@ The following versions are recommended:
 - pyyaml: 5.4+
 - kubernetes: 20.0+
 
-### Cloud Provider Setup (Optional)
+### Database Credentials
 
-For AWS integration (required for production use of compositions):
-- AWS account with appropriate IAM credentials
-- AWS provider configuration with credentials stored in a Kubernetes secret
-- **Recommended:** Store AWS credentials in Bitwarden and use `load-secrets.sh`:
+For Crossplane-managed PostgreSQL deployments:
+- **Recommended:** Store database credentials in Bitwarden and use `load-secrets.sh`:
   ```bash
-  # Load AWS credentials from vault and create the Kubernetes secret
+  # Load DB password from vault and create the Kubernetes secret
   ./load-secrets.sh --create-k8s
   ```
-
-For local development/testing:
-- Kubernetes provider (included in crossplane-providers.yaml) - no external credentials needed
+- All providers (Kubernetes, Helm) run locally on Kind — no cloud credentials needed
 
 ### Cluster Permissions
 
@@ -196,11 +192,10 @@ kubectl apply -f crossplane-providers.yaml
 
 **Expected Output:**
 ```
-provider.pkg.crossplane.io/provider-aws created
-controllerconfig.pkg.crossplane.io/aws-config created
-providerconfig.aws.upbound.io/default created
 provider.pkg.crossplane.io/provider-kubernetes created
 providerconfig.kubernetes.crossplane.io/default created
+provider.pkg.crossplane.io/provider-helm created
+providerconfig.helm.crossplane.io/default created
 ```
 
 #### Step 2.2: Verify Providers are Installed
@@ -216,8 +211,8 @@ kubectl get pods -n crossplane-system | grep provider
 Providers should show `INSTALLED=true` and `HEALTHY=true`:
 ```
 NAME                      INSTALLED   HEALTHY
-provider-aws              true        true
 provider-kubernetes       true        true
+provider-helm             true        true
 ```
 
 **Next Step:** Proceed to Phase 3: Infrastructure Blueprints
@@ -243,7 +238,7 @@ kubectl apply -f composition-postgresql.yaml
 
 **Expected Output:**
 ```
-composition.apiextensions.crossplane.io/postgresql-aws created
+composition.apiextensions.crossplane.io/postgresql-kubernetes created
 ```
 
 #### Step 3.3: Verify XRD and Composition
@@ -261,7 +256,7 @@ NAME                                        ESTABLISHED   OFFERED   AGE
 postgresqlinstances.database.platform.io    true          true      10s
 
 NAME                    AGE
-postgresql-aws          5s
+postgresql-kubernetes    5s
 ```
 
 #### Step 3.4: Verify the Custom Resource API is available
@@ -355,13 +350,13 @@ composition.apiextensions.crossplane.io/postgresql-production created
 
 #### Step 4.5: Verify All Compositions
 ```bash
-kubectl get compositions -l provider=aws
+kubectl get compositions -l provider=kubernetes
 ```
 
 **Expected Output:**
 ```
 NAME                          AGE
-postgresql-aws                2m
+postgresql-kubernetes         2m
 postgresql-development        30s
 postgresql-staging            30s
 postgresql-production         30s
@@ -592,11 +587,11 @@ kubectl describe postgresqlclaim demo-app-db -n team-alpha
 ```
 
 **Common causes:**
-- AWS credentials not configured (if using AWS provider)
-- VPC/security group selectors don't match any resources
-- Insufficient permissions in AWS
+- Crossplane providers not healthy (check `kubectl get providers`)
+- Database credentials secret not created (run `./load-secrets.sh --create-k8s`)
+- Insufficient RBAC permissions for the Kubernetes provider
 
-**Solution:** For local testing, use the Kubernetes provider without AWS credentials
+**Solution:** Verify providers are healthy and the `db-credentials` secret exists in `crossplane-system`
 
 ### Issue: Python script import errors
 ```bash
@@ -609,7 +604,7 @@ pip install --upgrade flask pyyaml kubernetes
 The companion website (https://peh-packt.platformetrics.com/) contains supplementary materials for Chapter 9, which may include:
 
 - Interactive Crossplane composition builder
-- Example AWS infrastructure configurations
+- Example infrastructure configurations for Kind clusters
 - Extended guardrail policy examples
 - Kubernetes manifest templates for webhook deployment
 - Video walkthroughs of the complete workflow
@@ -624,8 +619,8 @@ The companion website (https://peh-packt.platformetrics.com/) contains supplemen
 - Governance is applied transparently through defaults and validation rules
 
 ### Crossplane Architecture
-- **Providers:** Integrations with external systems (AWS, Azure, GCP, Kubernetes)
-- **Managed Resources:** Individual infrastructure components (RDS, S3, etc.)
+- **Providers:** Integrations with external systems (Kubernetes, Helm, and optionally cloud providers)
+- **Managed Resources:** Individual infrastructure components (Deployments, Services, Helm releases, etc.)
 - **Composite Resources:** High-level abstractions that hide complexity from consumers
 
 ### Governance Pattern

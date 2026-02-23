@@ -163,16 +163,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-1
+          version: 'latest'
 
       - name: Deploy to staging
         run: |
           echo "Deploying ${{ env.SERVICE_NAME }} to staging environment..."
-          # Example deployment commands:
+          # For Kind clusters, set KUBECONFIG to your cluster config
           # kubectl apply -f k8s/staging/deployment.yaml
           # or helm upgrade --install ${{ env.SERVICE_NAME }} ./helm-chart -f values-staging.yaml
           echo "✓ Deployment to staging completed"
@@ -213,11 +212,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-1
+          version: 'latest'
 
       - name: Deploy to production
         run: |

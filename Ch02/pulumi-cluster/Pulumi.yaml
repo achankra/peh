@@ -5,17 +5,14 @@ runtime:
     virtualenv: venv
 description: >
   Chapter 2: Scalable Platform Runtime
-  Deploys a Kind cluster with Istio service mesh and Flux GitOps,
-  or an AWS EKS cluster for production environments.
+  Deploys a local Kind cluster with Istio service mesh and Flux GitOps.
 
 config:
   cluster:name:
-    default: platform-cluster
+    value: platform-dev
   cluster:kubernetesVersion:
-    default: "1.28"
+    value: "1.28"
   cluster:numWorkerNodes:
-    default: 3
+    value: 2
   cluster:environment:
-    default: dev
-  aws:region:
-    default: us-east-1
+    value: dev

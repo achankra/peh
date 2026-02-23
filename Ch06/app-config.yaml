@@ -57,12 +57,11 @@ catalog:
 
 # --- TechDocs ---
 techdocs:
-  builder: external
+  builder: local
+  generator:
+    runIn: local
   publisher:
-    type: awsS3
-    awsS3:
-      bucketName: ${TECHDOCS_BUCKET}
-      region: ${AWS_REGION}
+    type: local
 
 # --- Proxy for internal services ---
 proxy:

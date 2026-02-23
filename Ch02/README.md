@@ -227,38 +227,31 @@ Istio service mesh configuration resources.
 - Define authorization policies
 - Configure observability with metrics and tracing
 
-### 2.6 (Alternative): Pulumi EKS Cluster
+### 2.6: Pulumi Kind Cluster
 
 **Primary File:** `pulumi-cluster/__main__.py`
 
-Production AWS EKS cluster deployment (alternative to Kind for cloud environments).
+Kind cluster deployment using Pulumi for infrastructure-as-code patterns.
 
 **Resources Created:**
-- VPC with public/private subnets across availability zones
-- Internet gateway and route tables
-- EKS cluster with managed control plane
-- IAM roles for cluster and worker nodes
-- Managed node groups with auto-scaling (t3.medium, 1-10 nodes)
-- EKS add-ons: CoreDNS, kube-proxy
-- CloudWatch logging for cluster operations
+- Kind cluster with configurable worker nodes
+- Docker network for cluster communication
+- Port mappings for ingress (80, 443) and NodePorts (30000-30100)
+- Kubeconfig export for kubectl access
 
 **Configuration (via Pulumi.yaml):**
 ```yaml
-cluster:name: platform-cluster
+cluster:name: platform-dev
 cluster:kubernetesVersion: "1.28"
-cluster:numWorkerNodes: 3
+cluster:numWorkerNodes: 2
 cluster:environment: dev
-aws:region: us-east-1
 ```
 
 **Learning Objectives:**
-- Provision production-grade EKS clusters with Pulumi
-- Configure AWS networking for Kubernetes
-- Manage cluster add-ons
-- Set up logging and monitoring
-- Enable managed node groups with auto-scaling
-
-**Note:** This file provides an AWS EKS alternative but the chapter primarily focuses on Kind clusters for learning. Both approaches use identical Pulumi patterns.
+- Provision Kind clusters with Pulumi
+- Configure cluster networking and port mappings
+- Manage cluster lifecycle with IaC
+- Export kubeconfig for kubectl access
 
 ### Supplementary Files
 
@@ -341,12 +334,12 @@ Pulumi project configuration file.
 
 ### pulumi-cluster/ Directory
 
-Complete production-ready Pulumi project for AWS EKS deployment.
+Pulumi project for Kind cluster deployment.
 
 **Files:**
-- `__main__.py`: Complete EKS cluster with VPC, subnets, node groups, add-ons
+- `__main__.py`: Kind cluster with configurable workers, networking, port mappings
 - `Pulumi.yaml`: Project configuration and stacks
-- `requirements.txt`: Python dependencies (pulumi, pulumi-aws, pulumi-eks, pulumi-kubernetes, pyyaml)
+- `requirements.txt`: Python dependencies (pulumi, pulumi-kubernetes, pyyaml)
 
 ### test/ Directory
 
@@ -401,8 +394,8 @@ The following files are complementary but not directly tied to chapter sections:
 1. **argocd-platform-app.yaml** - Alternative GitOps tool (Chapter 2 focuses on Flux, not ArgoCD)
    - Recommendation: Keep for reference; note in README that Flux is primary pattern
 
-2. **pulumi-cluster/__main__.py** - AWS EKS alternative (Chapter focuses on Kind)
-   - Recommendation: Keep as reference for production AWS deployments; document clearly as optional
+2. **pulumi-cluster/__main__.py** - Kind cluster via Pulumi (IaC approach)
+   - Recommendation: Use alongside the Kind CLI approach for comparing IaC vs imperative workflows
 
 3. **multi-env-config.yaml** - Standalone configuration comparison (informational, not executable)
    - Recommendation: Keep for learning environment design principles
@@ -456,11 +449,6 @@ All other files are core to the chapter content and should be retained.
    pip install pulumi pulumi-kubernetes pulumi-docker pyyaml
    ```
 
-### Optional Tools (for AWS EKS alternative)
-
-- **AWS CLI** (v2.0+) with configured credentials
-- **pulumi-aws** and **pulumi-eks** Python packages
-
 ## Step-by-Step Instructions
 
 ### Phase 1: Understanding Configuration (Read-Only)
@@ -513,9 +501,7 @@ Default runtime language python
 pulumi config set cluster:name platform-dev
 pulumi config set cluster:kubernetesVersion 1.27
 
-# For AWS EKS (optional):
-pulumi config set aws:region us-east-1
-pulumi config set cluster:numWorkerNodes 3
+pulumi config set cluster:numWorkerNodes 2
 ```
 
 **Expected Output:**
@@ -528,38 +514,25 @@ Set 'cluster:kubernetesVersion' to '1.27'
 
 **Step 3a: Deploy Infrastructure (Kind)**
 
-**Option A: Using Python modules directly:**
-```bash
-cd ..
-# Create a custom Pulumi program using cluster.py and network.py modules
-# This approach is documented in the chapter
-pulumi up
-```
-
-**Option B: Using provided EKS stack (requires AWS credentials):**
 ```bash
 cd pulumi-cluster
 pulumi up
 ```
 
 **Expected Output:**
-- Resource creation summary showing VPC, subnets, EKS cluster, node groups
-- Cluster endpoint and kubeconfig configuration
-- Duration: 15-20 minutes for full cluster provisioning
+- Resource creation summary showing Kind cluster, Docker network, port mappings
+- Kubeconfig export path
+- Duration: 1-2 minutes for Kind cluster provisioning
 
 **Step 3b: Configure kubectl Access**
 ```bash
-# For EKS:
-aws eks update-kubeconfig --region us-east-1 --name platform-cluster
-
-# For Kind (if using):
 kind get kubeconfig --name platform-dev > ~/.kube/kind-config-platform-dev
 export KUBECONFIG=~/.kube/kind-config-platform-dev
 ```
 
 **Expected Output:**
 ```
-Updated context arn:aws:eks:us-east-1:ACCOUNT:cluster/platform-cluster in /home/user/.kube/config
+Set kubectl context to "kind-platform-dev"
 ```
 
 **Step 3c: Verify Cluster Readiness**
@@ -811,13 +784,8 @@ kind delete cluster --name platform-dev
 
 **Expected Output:**
 ```
-Resources to delete:
- - eks:Cluster: platform-cluster
- - ec2:Instance: platform-cluster-worker-1
- ...
-
-Do you want to perform this destroy? [yes/no]: yes
-...
+Deleting cluster "platform-dev" ...
+Deleted nodes: ["platform-dev-control-plane" "platform-dev-worker" "platform-dev-worker2"]
 Stack 'dev' has been removed!
 ```
 
@@ -1052,7 +1020,7 @@ python test-cluster-health.py -v
 
 - [Kind Documentation](https://kind.sigs.k8s.io/)
 - [Pulumi Kubernetes Provider](https://www.pulumi.com/docs/reference/pkg/kubernetes/)
-- [Pulumi AWS Provider](https://www.pulumi.com/docs/reference/pkg/aws/)
+- [Pulumi Command Provider](https://www.pulumi.com/registry/packages/command/)
 - [Flux Documentation](https://fluxcd.io/docs/)
 - [Istio Documentation](https://istio.io/latest/docs/)
 - [OPA/Gatekeeper](https://open-policy-agent.github.io/gatekeeper/)

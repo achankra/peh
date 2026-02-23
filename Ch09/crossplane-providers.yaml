@@ -1,43 +1,10 @@
 # crossplane-providers.yaml
 # Provider configurations for Crossplane
-# Includes AWS provider and Kubernetes provider for local testing
+# Uses the Kubernetes provider and Helm provider for local Kind clusters
+# No cloud provider dependencies — everything runs locally
 
 ---
-apiVersion: pkg.crossplane.io/v1
-kind: Provider
-metadata:
-  name: provider-aws
-spec:
-  package: xpkg.upbound.io/upbound/provider-family-aws:v1.7.0
-  controllerConfigRef:
-    name: aws-config
----
-apiVersion: pkg.crossplane.io/v1alpha1
-kind: ControllerConfig
-metadata:
-  name: aws-config
-spec:
-  resources:
-    limits:
-      memory: 512Mi
-      cpu: 500m
-    requests:
-      memory: 256Mi
-      cpu: 100m
----
-apiVersion: aws.upbound.io/v1beta1
-kind: ProviderConfig
-metadata:
-  name: default
-spec:
-  credentials:
-    source: Secret
-    secretRef:
-      namespace: crossplane-system
-      name: aws-credentials
-      key: credentials
----
-# Kubernetes provider for local development and testing
+# Kubernetes provider — manages native K8s resources via Crossplane
 apiVersion: pkg.crossplane.io/v1
 kind: Provider
 metadata:
@@ -46,6 +13,22 @@ spec:
   package: xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.13.0
 ---
 apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: default
+spec:
+  credentials:
+    source: InjectedIdentity
+---
+# Helm provider — deploys Helm charts as Crossplane managed resources
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-helm
+spec:
+  package: xpkg.upbound.io/crossplane-contrib/provider-helm:v0.18.1
+---
+apiVersion: helm.crossplane.io/v1beta1
 kind: ProviderConfig
 metadata:
   name: default

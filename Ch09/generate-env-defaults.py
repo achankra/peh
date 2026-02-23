@@ -3,12 +3,14 @@
 
 This script generates separate Crossplane compositions for each environment
 (development, staging, production) with appropriate defaults for:
-- Instance class/size
+- Resource requests (CPU, memory)
 - Storage allocation
 - Backup retention
-- Multi-AZ configuration
+- Replica count
 - Deletion protection
-- Performance insights
+
+All compositions use the Kubernetes provider to deploy PostgreSQL
+as StatefulSets inside the Kind cluster — no cloud dependencies.
 """
 
 from dataclasses import dataclass
@@ -19,38 +21,50 @@ import yaml
 @dataclass
 class EnvironmentConfig:
     """Configuration defaults for an environment."""
-    instance_class: str
+    cpu_request: str
+    memory_request: str
+    cpu_limit: str
+    memory_limit: str
     storage_gb: int
     backup_retention_days: int
-    multi_az: bool
+    replicas: int
     deletion_protection: bool
-    performance_insights: bool
+    enable_monitoring: bool
 
 
 ENVIRONMENTS: Dict[str, EnvironmentConfig] = {
     "development": EnvironmentConfig(
-        instance_class="db.t3.micro",
-        storage_gb=20,
+        cpu_request="100m",
+        memory_request="256Mi",
+        cpu_limit="500m",
+        memory_limit="512Mi",
+        storage_gb=1,
         backup_retention_days=1,
-        multi_az=False,
+        replicas=1,
         deletion_protection=False,
-        performance_insights=False
+        enable_monitoring=False
     ),
     "staging": EnvironmentConfig(
-        instance_class="db.t3.small",
-        storage_gb=50,
+        cpu_request="250m",
+        memory_request="512Mi",
+        cpu_limit="1000m",
+        memory_limit="1Gi",
+        storage_gb=5,
         backup_retention_days=7,
-        multi_az=False,
+        replicas=1,
         deletion_protection=False,
-        performance_insights=True
+        enable_monitoring=True
     ),
     "production": EnvironmentConfig(
-        instance_class="db.r6g.large",
-        storage_gb=100,
+        cpu_request="500m",
+        memory_request="1Gi",
+        cpu_limit="2000m",
+        memory_limit="2Gi",
+        storage_gb=10,
         backup_retention_days=30,
-        multi_az=True,
+        replicas=2,
         deletion_protection=True,
-        performance_insights=True
+        enable_monitoring=True
     )
 }
 
@@ -64,7 +78,7 @@ def generate_composition(env_name: str, config: EnvironmentConfig) -> Dict[str, 
             "name": f"postgresql-{env_name}",
             "labels": {
                 "environment": env_name,
-                "provider": "aws"
+                "provider": "kubernetes"
             }
         },
         "spec": {
@@ -73,21 +87,53 @@ def generate_composition(env_name: str, config: EnvironmentConfig) -> Dict[str, 
                 "kind": "PostgreSQLInstance"
             },
             "resources": [{
-                "name": "rds-instance",
+                "name": "db-deployment",
                 "base": {
-                    "apiVersion": "rds.aws.upbound.io/v1beta1",
-                    "kind": "Instance",
+                    "apiVersion": "kubernetes.crossplane.io/v1alpha2",
+                    "kind": "Object",
                     "spec": {
                         "forProvider": {
-                            "engine": "postgres",
-                            "instanceClass": config.instance_class,
-                            "allocatedStorage": config.storage_gb,
-                            "backupRetentionPeriod": config.backup_retention_days,
-                            "multiAz": config.multi_az,
-                            "deletionProtection": config.deletion_protection,
-                            "performanceInsightsEnabled": config.performance_insights,
-                            "storageEncrypted": True,
-                            "publiclyAccessible": False
+                            "manifest": {
+                                "apiVersion": "apps/v1",
+                                "kind": "Deployment",
+                                "metadata": {
+                                    "name": f"postgresql-{env_name}",
+                                    "namespace": "databases"
+                                },
+                                "spec": {
+                                    "replicas": config.replicas,
+                                    "selector": {
+                                        "matchLabels": {
+                                            "app": "postgresql",
+                                            "environment": env_name
+                                        }
+                                    },
+                                    "template": {
+                                        "metadata": {
+                                            "labels": {
+                                                "app": "postgresql",
+                                                "environment": env_name
+                                            }
+                                        },
+                                        "spec": {
+                                            "containers": [{
+                                                "name": "postgresql",
+                                                "image": "postgres:15-alpine",
+                                                "resources": {
+                                                    "requests": {
+                                                        "cpu": config.cpu_request,
+                                                        "memory": config.memory_request
+                                                    },
+                                                    "limits": {
+                                                        "cpu": config.cpu_limit,
+                                                        "memory": config.memory_limit
+                                                    }
+                                                }
+                                            }]
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

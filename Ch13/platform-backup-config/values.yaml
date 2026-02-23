@@ -1,0 +1,457 @@
+# Velero Helm Chart Values for Platform Backup Configuration
+#
+# This values file configures a production-ready Velero deployment with:
+# - MinIO as S3-compatible local object storage (runs inside Kind)
+# - Daily and hourly backup schedules with retention policies
+# - Resource filtering and backup hooks
+# - Monitoring and alerting integration
+#
+# No cloud provider required — everything runs locally on Kind.
+#
+# Installation:
+#   helm repo add vmware-tanzu https://vmware-tanzu.github.io/helm-charts
+#   helm install velero vmware-tanzu/velero -f platform-backup-config/values.yaml
+
+# ============================================================================
+# Velero Core Configuration
+# ============================================================================
+
+velero:
+  # Image configuration
+  image:
+    repository: velero/velero
+    tag: v1.12.0
+    pullPolicy: IfNotPresent
+
+  # Namespace where Velero is installed
+  namespace:
+    create: true
+    name: velero
+
+  # Service account configuration
+  serviceAccount:
+    create: true
+    name: velero
+
+# ============================================================================
+# Backup Storage Configuration — MinIO (S3-compatible)
+# ============================================================================
+
+configuration:
+  # Backup storage location (primary) — MinIO inside the cluster
+  backupStorageLocation:
+    provider: aws
+    bucket: velero-backups
+    prefix: velero
+
+    # MinIO S3-compatible configuration
+    config:
+      # MinIO endpoint inside the cluster
+      s3Url: http://minio.velero.svc.cluster.local:9000
+
+      # Region is required by the plugin but arbitrary for MinIO
+      region: us-east-1
+
+      # Path-style required for MinIO
+      s3ForcePathStyle: "true"
+
+      # Disable TLS for local MinIO
+      insecureSkipTLSVerify: "true"
+
+      # Disable checksum validation
+      checksumAlgorithm: ""
+
+    # Validation settings
+    validationFrequency: 12h
+    accessMode: ReadWrite
+    default: true
+
+  # Volume snapshots disabled — using file-level backups with restic/kopia
+  # (Kind does not support CSI volume snapshots out of the box)
+  volumeSnapshotLocation: {}
+
+# ============================================================================
+# Backup Schedules Configuration
+# ============================================================================
+
+schedules:
+  # Daily backup schedule - runs at 2:00 AM UTC
+  daily-backup:
+    schedule: "0 2 * * *"
+    template:
+      storageLocation: default
+
+      # Include specific namespaces
+      includedNamespaces:
+        - team-alpha
+        - team-beta
+        - production
+
+      # Exclude system namespaces
+      excludedNamespaces:
+        - kube-system
+        - kube-public
+        - kube-node-lease
+        - velero
+        - kube-apiserver
+
+      # Resource filtering
+      includeClusterResources: true
+      includedNamespaceScopedResources:
+        - deployments
+        - daemonsets
+        - statefulsets
+        - pods
+        - persistentvolumeclaims
+        - persistentvolumes
+        - configmaps
+        - secrets
+        - services
+        - ingresses
+
+      # Cluster-scoped resources
+      includedClusterScopedResources:
+        - clusterrolebindings
+        - clusterroles
+        - storageclasses
+        - networkpolicies
+
+      # Exclude certain resource types
+      excludedResources:
+        - events
+        - events.events.k8s.io
+
+      # File-level backup for PVs (restic/kopia)
+      snapshotVolumes: false
+      defaultVolumesToFsBackup: true
+      csiSnapshotTimeout: 10m
+
+      # Retention policy - 30 days for daily backups
+      ttl: 720h
+
+      # Partial backups are allowed
+      allowEmptySnapshotVolumes: false
+
+      # Backup hooks for pre/post-backup operations
+      hooks:
+        resources:
+          # Pre-backup: Database quiescing
+          - name: db-quiesce
+            includedNamespaces:
+              - team-alpha
+              - team-beta
+            includedResources:
+              - pods
+            labelSelector:
+              matchLabels:
+                tier: database
+            pre:
+              - exec:
+                  container: database
+                  command:
+                    - /bin/sh
+                    - -c
+                    - |
+                      set +e
+                      # Quiesce database for consistent backup
+                      if command -v redis-cli &> /dev/null; then
+                        redis-cli BGSAVE
+                        sleep 2
+                      fi
+                      if command -v pg_dumpall &> /dev/null; then
+                        echo "Flushing PostgreSQL buffers..."
+                        psql -c "CHECKPOINT;"
+                      fi
+                      exit 0
+                  timeout: 5m
+
+          # Post-backup: Resume operations
+          - name: db-resume
+            includedNamespaces:
+              - team-alpha
+              - team-beta
+            includedResources:
+              - pods
+            labelSelector:
+              matchLabels:
+                tier: database
+            post:
+              - exec:
+                  container: database
+                  command:
+                    - /bin/sh
+                    - -c
+                    - |
+                      echo "Resuming database operations..."
+                      exit 0
+                  timeout: 2m
+
+      # Labels for backup organization
+      labels:
+        schedule-type: daily
+        retention-policy: "30days"
+        frequency: "daily"
+
+  # Hourly backup for production namespace - runs every hour
+  hourly-backup-production:
+    schedule: "0 * * * *"
+    template:
+      storageLocation: default
+
+      # Production only
+      includedNamespaces:
+        - production
+
+      excludedNamespaces:
+        - kube-system
+        - kube-public
+        - kube-node-lease
+        - velero
+
+      includeClusterResources: true
+      snapshotVolumes: false
+      defaultVolumesToFsBackup: true
+
+      # Retention policy - 48 hours for hourly backups
+      ttl: 48h
+
+      # Faster timeout for hourly backups
+      csiSnapshotTimeout: 5m
+
+      labels:
+        schedule-type: hourly
+        retention-policy: "48hours"
+        frequency: "hourly"
+
+# ============================================================================
+# Velero Server Configuration
+# ============================================================================
+
+configuration:
+  # Server log level
+  logLevel: info
+
+  # Features
+  features: "EnableCSI"
+
+  # Use file-level backups (restic/kopia) by default
+  defaultVolumesToFsBackup: true
+
+  # Defaults for restore operations
+  restoreResourcePriorities:
+    - "namespaces"
+    - "clusterrolebindings"
+    - "clusterroles"
+    - "storageclasses"
+    - "persistentvolumes"
+    - "persistentvolumeclaims"
+    - "secrets"
+    - "configmaps"
+    - "deployments"
+    - "daemonsets"
+    - "statefulsets"
+
+# ============================================================================
+# Credentials Configuration — MinIO
+# ============================================================================
+
+credentials:
+  useSecret: true
+  name: velero-minio-credentials
+
+  # Create the credential secret:
+  # kubectl create secret generic velero-minio-credentials \
+  #   --namespace velero \
+  #   --from-file=cloud=./credentials-velero
+  #
+  # credentials-velero contents:
+  #   [default]
+  #   aws_access_key_id=minioadmin
+  #   aws_secret_access_key=minioadmin
+
+# ============================================================================
+# Monitoring and Observability
+# ============================================================================
+
+monitoring:
+  # Prometheus metrics
+  prometheus:
+    enabled: true
+    port: 8085
+
+  # ServiceMonitor for Prometheus Operator
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    interval: 30s
+    scrapeTimeout: 10s
+
+    # Labels for ServiceMonitor
+    labels:
+      release: prometheus
+      monitoring: "true"
+
+  # Alerts for Velero operations
+  alerts:
+    enabled: true
+
+    # Alert thresholds
+    backupFailureAlert:
+      enabled: true
+      threshold: 3  # Alert if 3 consecutive backup failures
+      for: 1h
+
+    backupDurationAlert:
+      enabled: true
+      thresholdSeconds: 1800  # Alert if backup takes >30 minutes
+      for: 10m
+
+    restoreFailureAlert:
+      enabled: true
+      threshold: 2  # Alert if 2 consecutive restore failures
+      for: 1h
+
+    volumeSnapshotFailureAlert:
+      enabled: true
+      for: 10m
+
+    storageLocationValidationAlert:
+      enabled: true
+      for: 5m
+
+  # Grafana dashboard
+  dashboard:
+    enabled: true
+    labels:
+      grafana_dashboard: "true"
+
+# ============================================================================
+# Pod and Node Configuration
+# ============================================================================
+
+# Pod security and resource limits
+podSecurityContext:
+  runAsUser: 0
+  fsGroup: 0
+
+securityContext:
+  privileged: false
+  readOnlyRootFilesystem: true
+  runAsUser: 0
+
+# Resource requests and limits
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# Node selector removed — Kind nodes don't have custom labels
+nodeSelector: {}
+
+# Pod affinity for high availability
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - velero
+          topologyKey: kubernetes.io/hostname
+
+# Tolerations for node taints
+tolerations: []
+
+# ============================================================================
+# Encryption Configuration
+# ============================================================================
+
+# RBAC for Velero
+rbac:
+  create: true
+
+  # Custom ClusterRole for backup operations
+  clusterRole:
+    name: velero
+
+# Encryption — disabled for local MinIO (enable in production)
+encryption:
+  enabled: false
+
+# ============================================================================
+# Backup Hooks and Custom Scripts
+# ============================================================================
+
+# Init containers for custom setup
+initContainers: []
+
+# Sidecar containers for extended functionality
+sidecars: []
+
+# ConfigMaps for custom scripts
+extraMounts: []
+
+# ============================================================================
+# Maintenance and Cleanup
+# ============================================================================
+
+# Backup cleanup policy
+backupDeletionPolicy:
+  # Delete orphaned backups after 24 hours
+  orphanedBackupDeleteInterval: 24h
+
+  # Maintain at least 3 backups per schedule
+  minBackupsPerSchedule: 3
+
+# Restore cleanup
+restoreFailedRetentionDays: 7
+
+# ============================================================================
+# Additional Settings
+# ============================================================================
+
+# Replicas (for high availability)
+replicas: 1
+
+# Update strategy
+strategy:
+  type: Recreate
+
+# Image pull secrets if using private registry
+imagePullSecrets: []
+
+# Priority class for pod scheduling
+priorityClassName: ""
+
+# Service type
+service:
+  type: ClusterIP
+  port: 443
+
+# Ingress for remote access (optional)
+ingress:
+  enabled: false
+
+# ============================================================================
+# Post-Installation Verification
+# ============================================================================
+
+# Verification script to run after installation
+# Run: kubectl exec -n velero deployment/velero -- velero version
+#      kubectl exec -n velero deployment/velero -- velero backup-location get
+#      kubectl exec -n velero deployment/velero -- velero schedule get
+#
+# Create sample backup:
+#   velero backup create manual-backup --wait
+#
+# List backups:
+#   velero backup get
+#
+# Validate restore procedures:
+#   ./restore-validation.sh --backup-name manual-backup

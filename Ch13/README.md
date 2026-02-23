@@ -31,14 +31,14 @@ The code in this directory implements a complete resilience automation platform 
 | File | Chapter Reference | Purpose |
 |------|-------------------|---------|
 | **velero-schedule.yaml** | Listing 13.2 | Kubernetes Schedule resources defining daily (2 AM) and hourly (production) automated backups with 7-day and 3-day retention |
-| **velero-storage-location.yaml** | Section 13.3 | Multi-cloud backup storage configuration for AWS S3, Azure Blob Storage, and Google Cloud Storage with encryption and lifecycle policies |
+| **velero-storage-location.yaml** | Section 13.3 | Backup storage configuration using MinIO (S3-compatible) running inside the Kind cluster, including MinIO deployment, credential secret, and bucket setup job |
 | **backup-config-annotation.yaml** | Listing 13.2 | Deployment example with Velero backup hooks (pre/post-backup) demonstrating database quiescing and graceful backup preparation |
 | **backup-automation.py** | Section 13.3 | Python orchestration script for Velero backup management: create backups, validate integrity, check freshness, cleanup old backups |
 | **velero-dr-commands.sh** | Section 13.3 | Automated DR drill script that creates backup, simulates disaster (deletes namespaces), restores from backup, and measures actual RTO |
 | **disaster-recovery-plan.py** | Section 13.3 | DR validation framework checking backup freshness, RTO/RPO compliance, and readiness for disaster scenarios |
 | **restore-validation.sh** | Section 13.3 | Automated restore validation script: performs test restore to a temporary namespace, verifies pod health and service availability, measures actual RTO, and cleans up. Suitable for weekly automated DR validation runs. |
 | **backup-self-service.yaml** | Section 13.3 | Self-service backup labeling pattern enabling development teams to opt into backup automation through simple Kubernetes labels |
-| **platform-backup-config/values.yaml** | Section 13.3 | Helm values file for production Velero deployment: AWS S3 storage (with Azure/GCS alternatives), daily + hourly backup schedules, retention policies, pre/post-backup hooks, Prometheus monitoring, and alert rules |
+| **platform-backup-config/values.yaml** | Section 13.3 | Helm values file for production Velero deployment: MinIO as S3-compatible local storage, daily + hourly backup schedules, retention policies, pre/post-backup hooks, Prometheus monitoring, and alert rules |
 
 ### Chaos Engineering Files
 
@@ -71,7 +71,7 @@ The code in this directory implements a complete resilience automation platform 
    sudo mv velero-v1.12.0-linux-amd64/velero /usr/local/bin/
    velero version
    ```
-   - Requires cloud credentials (AWS S3, Azure, or GCS)
+   - Uses MinIO (S3-compatible) running inside the Kind cluster — no cloud credentials required
    - Documentation: https://velero.io/docs/
 
 3. **Chaos Mesh** - Kubernetes native chaos engineering platform
@@ -113,11 +113,9 @@ The code in this directory implements a complete resilience automation platform 
 - At least 3 worker nodes for multi-pod chaos experiments
 - Sufficient CPU/memory for Prometheus and Velero components
 
-### Access Credentials
+### Storage Backend
 
-- **AWS**: IAM credentials with S3 full access and EBS snapshot permissions
-- **Azure**: Service principal with Storage and Snapshot permissions
-- **GCS**: Service account with Storage Object Admin role
+MinIO is used as an S3-compatible local object store — it runs inside the Kind cluster alongside Velero. No cloud provider credentials are needed. The `velero-storage-location.yaml` manifest deploys MinIO, creates the backup bucket, and configures the Velero credentials secret automatically.
 
 ## Step-by-Step Instructions
 
@@ -192,27 +190,27 @@ curl -X POST http://localhost:3000/api/dashboards/db \
 # Create velero namespace
 kubectl create namespace velero
 
-# Configure cloud credentials (AWS example)
-cat > velero-credentials <<EOF
-[default]
-aws_access_key_id=YOUR_ACCESS_KEY
-aws_secret_access_key=YOUR_SECRET_KEY
-EOF
+# Deploy MinIO and Velero storage configuration
+kubectl apply -f velero-storage-location.yaml
 
-# Install Velero
+# Wait for MinIO to be ready
+kubectl wait --for=condition=available deployment/minio -n velero --timeout=120s
+
+# Install Velero with the AWS (S3-compatible) plugin pointing to MinIO
 velero install \
   --provider aws \
   --plugins velero/velero-plugin-for-aws:v1.8.0 \
-  --bucket my-cluster-backups-prod \
-  --secret-file ./velero-credentials \
+  --bucket velero-backups \
+  --secret-file <(echo -e "[default]\naws_access_key_id=minioadmin\naws_secret_access_key=minioadmin") \
+  --backup-location-config region=us-east-1,s3ForcePathStyle=true,s3Url=http://minio.velero.svc.cluster.local:9000 \
   --namespace velero \
-  --secret-key-file ~/.ssh/id_rsa
+  --use-restic
 
 # Verify installation
 kubectl get pods -n velero
 velero backup-location get
 ```
-**Expected Output:** Velero pods running, `aws-s3` backup location accessible
+**Expected Output:** Velero pods running, `default` backup location accessible (MinIO)
 
 **Next Steps:** Proceed to Step 2.2
 
@@ -345,7 +343,7 @@ helm install velero vmware-tanzu/velero \
   -f platform-backup-config/values.yaml
 ```
 
-Key configuration areas: AWS S3 storage (with Azure/GCS alternatives commented), daily + hourly backup schedules, 30-day retention, pre/post-backup hooks for database quiescing, Prometheus monitoring, and alert rules.
+Key configuration areas: MinIO as S3-compatible local storage, daily + hourly backup schedules, 30-day retention, pre/post-backup hooks for database quiescing, Prometheus monitoring, and alert rules.
 
 ### Phase 3: Chaos Engineering and Resilience Testing
 
@@ -676,7 +674,7 @@ code/
 │
 ├── Backup and DR
 │   ├── velero-schedule.yaml               # Automated backup schedules (daily + hourly)
-│   ├── velero-storage-location.yaml       # Multi-cloud storage config (AWS, Azure, GCS)
+│   ├── velero-storage-location.yaml       # MinIO storage config (S3-compatible, local)
 │   ├── backup-config-annotation.yaml      # Deployment with backup hooks (Listing 13.2)
 │   ├── backup-self-service.yaml           # Self-service backup labeling pattern
 │   ├── backup-automation.py               # Python script for backup management
