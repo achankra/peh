@@ -118,11 +118,6 @@ spec:
     limits.memory: "{memory}"
     pods: "{pods}"
     persistentvolumeclaims: "5"
-  scopeSelector:
-    matchExpressions:
-      - operator: NotIn
-        scopeName: PriorityClass
-        values: ["system-critical"]
 """
     
     print(f"Creating ResourceQuota for namespace '{namespace}'...")

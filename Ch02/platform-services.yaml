@@ -1,43 +1,18 @@
-# Platform Services Kustomization
-# 
-# This Kustomization defines cluster-wide platform services managed by Flux.
-# It includes Istio service mesh, TLS certificate management, monitoring stack,
-# and OPA/Gatekeeper policy enforcement.
+# Platform Services
 #
-# Structure:
-# - Resources are organized by function
-# - Each service has its own namespace
-# - Common patterns (labels, annotations) are applied via Kustomize
-# - Flux GitOps controller reconciles this configuration
-
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-metadata:
-  name: platform-services
-  namespace: flux-system
-
-# Common labels applied to all resources
-commonLabels:
-  app.kubernetes.io/managed-by: flux
-  platform: scalable-runtime
-
-# Common annotations
-commonAnnotations:
-  kustomize.toolkit.fluxcd.io/version: "4.0"
-
-# Resources managed by this Kustomization
-resources:
-  # Istio service mesh
-  - istio-system.yaml
-  # TLS certificate management
-  - cert-manager.yaml
-  # Monitoring stack (Prometheus, Grafana, Alertmanager)
-  - monitoring.yaml
-  # OPA/Gatekeeper policy engine
-  - opa-gatekeeper.yaml
-  # Network policies
-  - network-policies.yaml
-
+# Cluster-wide platform services managed by Flux GitOps.
+# Includes Istio service mesh, TLS certificate management (cert-manager),
+# monitoring stack (Prometheus/Grafana), and OPA/Gatekeeper policy enforcement.
+#
+# Prerequisites:
+#   - Flux installed: flux install --namespace flux-system
+#   - Application namespace created: kubectl create namespace application
+#
+# Usage:
+#   kubectl apply -f platform-services.yaml
+#   # Wait for Flux to reconcile HelmReleases, then re-apply for CRD-dependent resources:
+#   flux get helmrelease -A
+#   kubectl apply -f platform-services.yaml
 ---
 # Istio System Namespace and Components
 apiVersion: v1
@@ -48,7 +23,7 @@ metadata:
     istio-injection: disabled
 
 ---
-apiVersion: helm.toolkit.fluxcd.io/v2beta1
+apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: istio-base
@@ -69,7 +44,7 @@ spec:
     crds: CreateReplace
 
 ---
-apiVersion: helm.toolkit.fluxcd.io/v2beta1
+apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: istiod
@@ -102,7 +77,7 @@ spec:
         PILOT_ENABLE_ALPHA_GATEWAY_API: "true"
 
 ---
-apiVersion: helm.toolkit.fluxcd.io/v2beta1
+apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: istio-ingress
@@ -146,7 +121,7 @@ metadata:
   name: cert-manager
 
 ---
-apiVersion: helm.toolkit.fluxcd.io/v2beta1
+apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: cert-manager
@@ -166,6 +141,7 @@ spec:
   upgrade:
     crds: CreateReplace
   values:
+    installCRDs: true
     namespace: cert-manager
     serviceAccount:
       create: true
@@ -226,7 +202,7 @@ metadata:
 
 ---
 # Prometheus Operator
-apiVersion: helm.toolkit.fluxcd.io/v2beta1
+apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: kube-prometheus-stack
@@ -287,7 +263,7 @@ metadata:
 
 ---
 # Gatekeeper via Helm
-apiVersion: helm.toolkit.fluxcd.io/v2beta1
+apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: gatekeeper
@@ -327,19 +303,24 @@ spec:
     spec:
       names:
         kind: K8sRequiredLimits
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            required:
+              type: array
+              items:
+                type: string
+              description: "List of required resource limit types (e.g. cpu, memory)"
   targets:
     - target: admission.k8s.gatekeeper.sh
       rego: |
         package k8srequiredlimits
         violation[{"msg": msg}] {
           container := input.review.object.spec.containers[_]
-          not container.resources.limits.cpu
-          msg := sprintf("Container %v is missing required CPU limit", [container.name])
-        }
-        violation[{"msg": msg}] {
-          container := input.review.object.spec.containers[_]
-          not container.resources.limits.memory
-          msg := sprintf("Container %v is missing required memory limit", [container.name])
+          required := input.parameters.required[_]
+          not container.resources.limits[required]
+          msg := sprintf("Container %v is missing required %v limit", [container.name, required])
         }
 
 ---
@@ -373,6 +354,7 @@ spec:
         kind: K8sAllowedRegistries
       validation:
         openAPIV3Schema:
+          type: object
           properties:
             allowedRegistries:
               type: array
@@ -455,7 +437,7 @@ spec:
 
 ---
 # HelmRepository sources for Flux
-apiVersion: source.toolkit.fluxcd.io/v1beta2
+apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
   name: istio
@@ -465,7 +447,7 @@ spec:
   url: https://istio-release.storage.googleapis.com/charts
 
 ---
-apiVersion: source.toolkit.fluxcd.io/v1beta2
+apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
   name: jetstack
@@ -475,7 +457,7 @@ spec:
   url: https://charts.jetstack.io
 
 ---
-apiVersion: source.toolkit.fluxcd.io/v1beta2
+apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
   name: prometheus-community
@@ -485,7 +467,7 @@ spec:
   url: https://prometheus-community.github.io/helm-charts
 
 ---
-apiVersion: source.toolkit.fluxcd.io/v1beta2
+apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
   name: open-policy-agent
