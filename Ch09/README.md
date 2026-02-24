@@ -633,7 +633,7 @@ The companion website (https://peh-packt.platformetrics.com/) contains supplemen
 ## Files Reference
 
 ```
-ch9/code/
+Ch09/
 ├── crossplane-providers.yaml           # Provider configuration (Listing 9.1)
 ├── xrd-postgresql.yaml                 # PostgreSQL XRD (Listing 9.2)
 ├── composition-postgresql.yaml         # PostgreSQL composition (Listing 9.3)

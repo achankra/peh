@@ -1,0 +1,34 @@
+# Chapter 3 - Securing Platform Access
+# OPA Gatekeeper Constraint: Require Resource Limits
+#
+# This Constraint enforces that all pods must have CPU and memory
+# limits set on every container. Prevents unbounded resource
+# consumption in shared clusters.
+#
+# Usage:
+#   1. Apply the template first: kubectl apply -f template-resource-limits.yaml
+#   2. Apply this constraint: kubectl apply -f constraint-resource-limits.yaml
+
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequireResourceLimits
+metadata:
+  name: require-resource-limits
+  annotations:
+    description: "All containers must specify CPU and memory limits"
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    # Exclude system namespaces
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - gatekeeper-system
+      - flux-system
+      - default
+  parameters:
+    exemptImages:
+      - "registry.k8s.io/pause:*"

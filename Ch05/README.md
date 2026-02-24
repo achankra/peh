@@ -507,7 +507,7 @@ curl http://localhost:5000/health
 
 **Monitor HPA Scaling**:
 ```bash
-# Watch the HPA behavior
+# Watch the HPA behavior (press Ctrl+C to stop watching)
 kubectl get hpa platform-demo-app-hpa --watch
 
 # Generate load to trigger scaling (in another terminal)
@@ -515,6 +515,8 @@ kubectl run -it --rm debug --image=alpine --restart=Never -- sh
 # Inside the pod:
 while true; do wget -q -O- http://platform-demo-app; done
 ```
+
+> **Note**: Press Ctrl+C to stop the watch command after observing the scaling behavior.
 
 **Expected Output**: Pods running (2-5 replicas depending on load), service accessible, HPA scaling up as load increases
 

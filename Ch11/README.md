@@ -691,8 +691,10 @@ opa test policies/require-tests-passed_test.rego -v
 
 ### Gatekeeper Pods Not Starting
 
+> **Important**: If Gatekeeper was installed via Flux (Chapter 2), pods may be in `flux-system` instead of `gatekeeper-system`. Check both namespaces: `kubectl get pods -A | grep gatekeeper`
+
 ```bash
-# Check pod events and logs
+# Check pod events and logs (adjust namespace if using flux-system)
 kubectl describe pod -n gatekeeper-system \
   -l control-plane=controller-manager
 
@@ -742,10 +744,13 @@ conftest test -p conftest-tests/policy.rego /tmp/deployment.yaml -d
 ### Webhook Timeouts During Deployments
 
 ```bash
-# Issue: Gatekeeper webhook slow to respond
+# Issue: Gatekeeper webhook slow to respond or "context deadline exceeded"
 # Symptoms: kubectl apply takes >30 seconds or fails with timeout
 
-# Check webhook logs for slowness
+# Workaround: Delete the stale webhook (Gatekeeper will recreate it)
+kubectl delete validatingwebhookconfiguration gatekeeper-validating-webhook-configuration
+
+# Check webhook logs for slowness (adjust namespace if pods are in flux-system)
 kubectl logs -n gatekeeper-system deployment/gatekeeper-audit | grep -i latency
 
 # Solution options:
@@ -806,7 +811,7 @@ Expected sections:
 ## File Structure Summary
 
 ```
-Ch11/code/
+Ch11/
 ├── README.md                                    # This file
 ├── gatekeeper-install.yaml                      # Kubernetes manifests for Gatekeeper deployment
 ├── install-gatekeeper.sh                        # Helm installation script (alternative)

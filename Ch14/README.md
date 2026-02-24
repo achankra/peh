@@ -392,7 +392,7 @@ Suggested Action: Increase pool size or restart connection handler
 
 #### 4.1 Run the Multi-Agent Workflow
 ```bash
-cd /path/to/Ch14/code
+cd /path/to/Ch14
 python agents/multi_agent_system.py
 ```
 

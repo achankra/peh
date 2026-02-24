@@ -447,13 +447,14 @@ kubectl scale deployment myapp-green -n staging \
 kubectl rollout status deployment/myapp-green -n staging --timeout=5m
 
 # 3. Run tests against green (via port-forward)
-kubectl port-forward -n staging svc/myapp-green 8080:8080 &
-curl -f http://localhost:8080/health/ready && echo "Green is healthy"
+# Note: If port 8080 is in use by Kind, use a different local port (e.g., 8081)
+kubectl port-forward -n staging svc/myapp-green 8081:8080 &
+curl -f http://localhost:8081/health/ready && echo "Green is healthy"
 
 # 4. Switch traffic to green
 kubectl patch service myapp -n staging -p '{"spec":{"selector":{"color":"green"}}}'
 
-# 5. Monitor for issues (5-10 minutes)
+# 5. Monitor for issues (5-10 minutes, press Ctrl+C to stop)
 watch kubectl get pods -n staging
 
 # 6. If issues, rollback to blue

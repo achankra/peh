@@ -270,6 +270,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 5m
+  targetNamespace: gatekeeper-system
   chart:
     spec:
       chart: gatekeeper
@@ -279,7 +280,6 @@ spec:
         namespace: flux-system
       version: 'v3.13.0'
   values:
-    namespace: gatekeeper-system
     replicas: 2
     audit:
       replicas: 1

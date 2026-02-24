@@ -17,7 +17,11 @@
 #   - Secrets already stored in Bitwarden (via upload-secrets.sh)
 # =============================================================================
 
-set -euo pipefail
+# Only set strict mode when run directly, not when sourced
+# (set -e in a sourced script kills the parent shell on any failure)
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    set -euo pipefail
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -31,10 +35,10 @@ _bw_load_env() {
     if [ -f "$env_file" ]; then
         # shellcheck source=/dev/null
         source "$env_file"
-    elif [ -f "../../Ch01/.env" ]; then
-        # Fall back to Ch01 .env when running from other chapters
+    elif [ -f "../Ch01/.env" ]; then
+        # Fall back to Ch01 .env when running from other chapters (peh/Ch03 -> peh/Ch01)
         # shellcheck source=/dev/null
-        source "../../Ch01/.env"
+        source "../Ch01/.env"
     else
         echo -e "${RED}Error: No .env file found.${NC}"
         echo "Create one from .env_example in Ch01/ with your Bitwarden credentials."
@@ -136,5 +140,7 @@ bw_cleanup() {
     fi
 }
 
-# Trap to ensure vault is locked on script exit
-trap bw_cleanup EXIT
+# Trap to ensure vault is locked on script exit (only when run directly, not sourced)
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    trap bw_cleanup EXIT
+fi

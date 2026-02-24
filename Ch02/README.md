@@ -1178,9 +1178,12 @@ colima start --cpu 4 --memory 6
 
 **`kubectl label namespace` or `kubectl apply` fails with "failed calling webhook check-ignore-label.gatekeeper.sh: context deadline exceeded":**
 
-Gatekeeper's validating webhook isn't ready yet or is timing out. This commonly happens right after Flux installs Gatekeeper. Note that Flux installs Gatekeeper into `flux-system` (not `gatekeeper-system`), so check pods there:
+Gatekeeper's validating webhook isn't ready yet or is timing out. This commonly happens right after Flux installs Gatekeeper. Check if Gatekeeper pods are running:
 ```bash
-# Check if Gatekeeper pods are running (they're in flux-system, not gatekeeper-system)
+# Check Gatekeeper pods (should be in gatekeeper-system)
+kubectl get pods -n gatekeeper-system | grep gatekeeper
+
+# If nothing found, check flux-system (Flux may install there if targetNamespace is missing)
 kubectl get pods -n flux-system | grep gatekeeper
 ```
 
@@ -1211,6 +1214,24 @@ kubectl apply -f istio-mesh-config.yaml
 These fields were removed or renamed in newer Istio versions (1.22+). The updated `istio-mesh-config.yaml` uses the correct field names for Istio 1.22+:
 - `outlierDetection.minRequestVolume` has been removed — delete it
 - `Telemetry` uses `telemetry.istio.io/v1` with `overrides`/`tagOverrides` instead of `v1alpha1` with `dimensions`
+
+**RequestAuthentication fails with "spec.jwtRules[0].audiences must be of type array":**
+
+The `audiences` field in a `RequestAuthentication` must be a YAML list, not a plain string:
+```yaml
+# Wrong
+audiences: "platform-api"
+
+# Correct
+audiences:
+  - "platform-api"
+```
+
+### Namespace Provisioner Issues
+
+**`namespace-provisioner.py` fails with "unsupported scope applied to resource" on ResourceQuota:**
+
+The `scopeSelector` with `PriorityClass` scope cannot be combined with CPU/memory resource quotas — it only applies to pod-count resources. Remove the `scopeSelector` block from the ResourceQuota manifest entirely. The quota still enforces all resource limits without it.
 
 ### Cluster Issues
 

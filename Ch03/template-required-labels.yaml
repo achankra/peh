@@ -1,0 +1,56 @@
+# Chapter 3 - Securing Platform Access
+# OPA Gatekeeper ConstraintTemplate: K8sRequiredLabels
+#
+# This template defines a policy that requires specified labels
+# on Kubernetes resources. Used by constraint-namespace-labels.yaml
+# to enforce team, cost-center, and environment labels on namespaces.
+#
+# Usage:
+#   kubectl apply -f template-required-labels.yaml
+#   # Wait ~10 seconds for Gatekeeper to generate the CRD
+#   kubectl apply -f constraint-namespace-labels.yaml
+
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlabels
+  annotations:
+    description: "Requires specified labels on resources"
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLabels
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            labels:
+              type: array
+              items:
+                type: object
+                properties:
+                  key:
+                    type: string
+                  allowedRegex:
+                    type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredlabels
+
+        violation[{"msg": msg}] {
+          provided := {label | input.review.object.metadata.labels[label]}
+          required := {label | label := input.parameters.labels[_].key}
+          missing := required - provided
+          count(missing) > 0
+          msg := sprintf("Missing required label(s): %v", [missing])
+        }
+
+        violation[{"msg": msg}] {
+          label := input.parameters.labels[_]
+          label.allowedRegex != ""
+          value := input.review.object.metadata.labels[label.key]
+          not re_match(label.allowedRegex, value)
+          msg := sprintf("Label <%v: %v> does not match regex %v", [label.key, value, label.allowedRegex])
+        }

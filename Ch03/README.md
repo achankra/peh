@@ -115,15 +115,42 @@ Found X potential security issues
 
 ### Phase 2: Identity & Access Management Setup
 
-**Step 2.1: Configure Keycloak Realm**
+**Step 2.0: Start Keycloak**
+
+Start a local Keycloak instance for development. We use port 8180 because port 8080 is already used by the Kind cluster's control-plane port mapping from Chapter 2:
+```bash
+docker run -d -p 8180:8080 \
+  -e KEYCLOAK_ADMIN=admin \
+  -e KEYCLOAK_ADMIN_PASSWORD=admin \
+  quay.io/keycloak/keycloak:latest start-dev
+```
+
+Verify Keycloak is running (may take 30–60 seconds to start):
+```bash
+curl -s http://localhost:8180/health/ready
+```
+
+**Step 2.1: Store Keycloak Credentials in Bitwarden**
+
+If using Bitwarden for secrets management (recommended), create the vault item so `load-secrets.sh` can retrieve credentials automatically:
+```bash
+# Create the peh-keycloak vault item
+echo '{"type":1,"name":"peh-keycloak","login":{"username":"admin","password":"admin","uris":[{"uri":"http://localhost:8180"}]}}' \
+  | bw encode | bw create item --session "$BW_SESSION"
+
+# Sync to make the item available
+bw sync --session "$BW_SESSION"
+```
+
+**Step 2.2: Configure Keycloak Realm**
 ```bash
 # Option A: Load credentials from Bitwarden (recommended)
 source load-secrets.sh
 
 # Option B: Set environment variables manually
-export KEYCLOAK_URL="https://keycloak.example.com"
+export KEYCLOAK_URL="http://localhost:8180"
 export KEYCLOAK_ADMIN="admin"
-export KEYCLOAK_PASSWORD="your-secure-password"
+export KEYCLOAK_PASSWORD="admin"
 
 # Run configuration script
 python keycloak-realm-config.py
@@ -271,15 +298,10 @@ kubectl describe certificate demo-app-cert -n demo-app
 **Expected Output:**
 ```
 NAME              READY   SECRET        AGE
-demo-app-cert     True    demo-app-tls  2m
-
-Status:
-  Conditions:
-    Type: Ready
-    Status: True
-    Reason: Issued
-    Message: Certificate issued successfully
+demo-app-cert     False   demo-app-tls  2m
 ```
+
+> **Note:** On a local Kind cluster, certificates will show `Ready=False` because Let's Encrypt issuers require real DNS and the self-signed CA needs time to propagate. This is expected — the resources are created correctly and the pattern is what matters. Press `Ctrl+C` after a few seconds to stop the watch and move on.
 
 **Next Steps:** Proceed to Phase 5 for policy enforcement.
 
@@ -305,23 +327,11 @@ kubectl get deployment -n gatekeeper-system
 # Apply ConstraintTemplate for resource limits
 kubectl apply -f template-resource-limits.yaml
 
-# Create Constraint to enforce the policy
-kubectl apply -f - <<EOF
-apiVersion: constraints.gatekeeper.sh/v1beta1
-kind: K8sRequireResourceLimits
-metadata:
-  name: require-resource-limits
-spec:
-  enforcementAction: deny
-  match:
-    kinds:
-      - apiGroups: [""]
-        kinds: ["Pod"]
-    excludedNamespaces:
-      - kube-system
-      - kube-public
-      - gatekeeper-system
-EOF
+# Wait for Gatekeeper to generate the CRD from the template
+sleep 10
+
+# Apply the Constraint that activates the policy
+kubectl apply -f constraint-resource-limits.yaml
 
 # Verify constraint
 kubectl get constraints
@@ -330,16 +340,22 @@ kubectl get constraints
 **Expected Output:**
 ```
 constrainttemplate.templates.gatekeeper.sh/k8srequireresourcelimits created
-constraint.constraints.gatekeeper.sh/require-resource-limits created
+k8srequireresourcelimits.constraints.gatekeeper.sh/require-resource-limits created
 ```
 
 **Step 5.3: Apply Namespace Labels Policy**
 ```bash
-# Apply namespace labels constraint
+# Apply ConstraintTemplate for required labels
+kubectl apply -f template-required-labels.yaml
+
+# Wait for CRD generation
+sleep 10
+
+# Apply the Constraint
 kubectl apply -f constraint-namespace-labels.yaml
 
-# Verify constraint
-kubectl get K8sRequiredLabels
+# Verify both constraints
+kubectl get constraints
 ```
 
 **Step 5.4: Test Policy Violations**
@@ -626,6 +642,32 @@ Users should follow along with the chapter while executing code from this direct
 3. **Gradual Privilege Escalation**: Platform provides escape hatches with logging, not broad admin access
 4. **Documentation**: Security audit reports help developers understand what's forbidden and why
 
+## Cleanup (Reset for Re-Recording)
+
+To reset all Chapter 3 resources and start from scratch:
+```bash
+# Stop and remove Keycloak container
+docker rm -f $(docker ps -aq --filter ancestor=quay.io/keycloak/keycloak) 2>/dev/null
+
+# Delete namespaces (removes all namespace-scoped resources within them)
+kubectl delete namespace demo-app dev platform-engineering platform --ignore-not-found
+
+# Delete cluster-scoped RBAC
+kubectl delete clusterrole platform-admin platform-admin-restricted platform-audit-viewer platform-operator --ignore-not-found
+kubectl delete clusterrolebinding platform-admin-binding platform-admin-sa-binding platform-audit-viewer-binding platform-operator-binding --ignore-not-found
+
+# Delete cert-manager ClusterIssuers (including internal CA issuer)
+kubectl delete clusterissuer letsencrypt-staging letsencrypt-production selfsigned-issuer selfsigned-ca internal-ca-issuer --ignore-not-found
+
+# Delete Gatekeeper constraints and templates
+kubectl delete k8srequireresourcelimits require-resource-limits --ignore-not-found
+kubectl delete k8srequiredlabels require-namespace-labels --ignore-not-found
+kubectl delete constrainttemplate k8srequireresourcelimits k8srequiredlabels --ignore-not-found
+
+# Delete any leftover test pods
+kubectl delete pod test-compliant test-noncompliant good-pod bad-pod -n demo-app --ignore-not-found 2>/dev/null
+```
+
 ## Troubleshooting
 
 ### Common Issues
@@ -669,7 +711,9 @@ kubectl get configmap -n kube-system kube-apiserver -o yaml | grep oidc
 **Policy Violation Rejection**
 ```bash
 # Get OPA Gatekeeper pod to check logs
-kubectl logs -n gatekeeper-system -l gatekeeper.sh/system=yes
+# Gatekeeper pods may be in gatekeeper-system or flux-system depending on install method
+kubectl logs -n gatekeeper-system -l gatekeeper.sh/system=yes 2>/dev/null || \
+  kubectl logs -n flux-system -l control-plane=controller-manager
 
 # Describe constraint to see current status
 kubectl describe K8sRequireResourceLimits require-resource-limits

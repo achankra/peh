@@ -633,13 +633,16 @@ yo @platform/backend-service
 
 ### Docker Compose Port Conflicts
 
-If ports are already in use:
+If ports are already in use (note: Kind uses port 8080 for its control-plane port mapping):
 
 ```bash
 # Change ports in generated docker-compose.yml
+# Port 8080 is used by Kind control-plane, so use 8081 instead
 sed -i 's/"8080:8080"/"8081:8080"/g' docker-compose.yml
 sed -i 's/"5432:5432"/"5433:5432"/g' docker-compose.yml
 ```
+
+> **Kind Cluster Note**: If you're running a Kind cluster from Chapter 2, port 8080 on the host is already mapped to Kind's control-plane ingress. Generated services should use port 8081 or higher to avoid conflicts.
 
 ### Tests Fail with ESLint Errors
 

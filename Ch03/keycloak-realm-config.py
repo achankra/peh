@@ -20,7 +20,7 @@ Prerequisites:
     - requests library: pip install requests
 
 Environment Variables:
-    KEYCLOAK_URL: Keycloak server URL (default: http://localhost:8080)
+    KEYCLOAK_URL: Keycloak server URL (default: http://localhost:8180)
     KEYCLOAK_ADMIN: Admin username (default: admin)
     KEYCLOAK_PASSWORD: Admin password
     KEYCLOAK_REALM: Realm to create (default: platform-engineering)
@@ -416,7 +416,7 @@ def main():
     )
     parser.add_argument(
         '--url',
-        default=os.getenv('KEYCLOAK_URL', 'http://localhost:8080'),
+        default=os.getenv('KEYCLOAK_URL', 'http://localhost:8180'),
         help='Keycloak server URL'
     )
     parser.add_argument(
