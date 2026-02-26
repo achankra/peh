@@ -166,9 +166,9 @@ Install or upgrade Backstage on your Kubernetes cluster:
 # Create a GitHub Personal Access Token (classic) with 'repo' scope at:
 # https://github.com/settings/tokens/new
 kubectl create namespace backstage
-kubectl create secret generic backstage-github-token \
+kubectl create secret generic backstage-secrets \
   --namespace backstage \
-  --from-literal=token=$GITHUB_TOKEN
+  --from-literal=GITHUB_TOKEN=$GITHUB_TOKEN
 
 # Add Backstage Helm repository
 helm repo add backstage https://backstage.github.io/charts
@@ -184,9 +184,9 @@ kubectl get pods -n backstage
 kubectl logs -n backstage -l app=backstage --tail=50
 ```
 
-> **Note:** The `backstage-helm-values.yaml` references the `backstage-github-token` secret via `GITHUB_TOKEN` env var and `integrations.github` in the app-config. Without this, Backstage cannot fetch `catalog-info.yaml` files from GitHub and will return "Missing credentials" errors during catalog registration.
+> **How the GitHub token works:** The default Backstage image ships with `integrations.github.token: ${GITHUB_TOKEN}` in its built-in app-config. The Helm chart's `extraEnvVarsSecrets` injects every key from the `backstage-secrets` Kubernetes Secret as a container env var. The secret key name (`GITHUB_TOKEN`) must match the env var name exactly. Without this, the catalog registration page shows "Missing credentials" or "401 Unauthorized" when fetching from GitHub.
 
-> **Auth:** The values file enables guest authentication with `auth.providers.guest.dangerouslyAllowOutsideDevelopment: true`. Newer Backstage versions require an explicit auth provider — without this, the UI returns 401 on every API call ("Failed to load entity kinds", "Could not fetch catalog entities"). In production, replace guest auth with OAuth/OIDC (e.g., Keycloak from Chapter 3).
+> **How auth works:** The default Backstage image ships with guest auth enabled (`auth.environment: development`, `auth.providers.guest: {}`). Our values file deliberately does NOT override the `auth` section, so guest auth works out of the box. If you override `appConfig.auth` and forget to include the guest provider, the Catalog page shows "Failed to load entity kinds" / "401 Unauthorized" on every API call. In production, replace guest auth with OAuth/OIDC (e.g., Keycloak from Chapter 3).
 
 **Expected output**:
 - 1 Backstage pod running

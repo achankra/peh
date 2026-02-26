@@ -1,9 +1,38 @@
-# Backstage Helm Chart Values
-# This configuration deploys Backstage on a local Kind cluster for demo purposes.
-# Adapted for the official backstage/backstage Helm chart (v2.x).
-#
+# Backstage Helm Chart Values — Local Kind Cluster
 # Chart repo: https://backstage.github.io/charts
 # Docs: https://github.com/backstage/charts
+#
+# The default Backstage image (ghcr.io/backstage/backstage:latest) ships with
+# a built-in app-config.yaml that already includes:
+#   - auth.environment: development  (guest auth enabled)
+#   - auth.providers.guest: {}       (guest sign-in resolver)
+#   - integrations.github with token: ${GITHUB_TOKEN}
+#   - backend.database: better-sqlite3 :memory:
+#
+# This values file overrides only what we need for a Kind deployment:
+#   1. Switch the database from SQLite to PostgreSQL (Bitnami subchart)
+#   2. Inject GITHUB_TOKEN from a Kubernetes Secret
+#   3. Set the base URLs to localhost:7007
+#
+# IMPORTANT — Two common gotchas with the vanilla Backstage Helm deployment:
+#
+#   Gotcha 1: "Failed to load entity kinds" / 401 Unauthorized on Catalog page
+#     The built-in image ships with auth.environment: development and guest
+#     auth enabled, so this works out of the box. If you override the auth
+#     section in appConfig and forget to include guest, you'll get 401 on
+#     every /api/* call. We intentionally preserve the built-in auth config
+#     by NOT overriding the auth section here.
+#
+#   Gotcha 2: "Missing credentials" when registering a GitHub catalog URL
+#     The built-in image has integrations.github configured to read
+#     ${GITHUB_TOKEN} from the environment. The token must actually be
+#     present in the container. We use extraEnvVarsSecrets to inject it
+#     from a Kubernetes Secret called 'backstage-secrets'. The secret key
+#     name (GITHUB_TOKEN) must match the env var name exactly.
+#     Create it with:
+#       kubectl create secret generic backstage-secrets \
+#         --namespace backstage \
+#         --from-literal=GITHUB_TOKEN=ghp_YourTokenHere
 
 # --- Backstage application ---
 backstage:
@@ -18,22 +47,18 @@ backstage:
   containerPorts:
     backend: 7007
 
-  # Extra environment variables passed to the Backstage container
-  extraEnvVars:
-    - name: NODE_ENV
-      value: production
-    - name: LOG_LEVEL
-      value: info
-    - name: GITHUB_TOKEN
-      valueFrom:
-        secretKeyRef:
-          name: backstage-github-token
-          key: token
+  # Inject GITHUB_TOKEN from Kubernetes Secret into the container.
+  # The built-in app-config.yaml reads ${GITHUB_TOKEN} for GitHub integration.
+  # extraEnvVarsSecrets injects every key from the named secret as an env var.
+  extraEnvVarsSecrets:
+    - backstage-secrets
 
-  # Inline app-config overrides (merged with the image's built-in app-config.yaml)
+  # Override only the settings that differ from the built-in app-config.yaml.
+  # The Helm chart merges this with the image's default config.
+  # We do NOT override the auth section — the built-in guest auth works as-is.
   appConfig:
     app:
-      title: "Backstage Developer Portal"
+      title: "Platform Engineer's Handbook — Developer Portal"
       baseUrl: http://localhost:7007
     backend:
       baseUrl: http://localhost:7007
@@ -45,26 +70,10 @@ backstage:
           host: backstage-postgresql
           port: 5432
           user: backstage
-          password: ChangeMe123!
-          database: backstage
+          password: backstage
       cache:
         store: memory
-    # Auth — enable guest access for local demo (no SSO/Keycloak in Kind)
-    # In production, replace with OAuth/OIDC provider (see app-config.production.yaml)
-    auth:
-      environment: development
-      providers:
-        guest:
-          dangerouslyAllowOutsideDevelopment: true
-    # GitHub integration — required for catalog registration from GitHub URLs
-    # Replace YOUR_GITHUB_TOKEN with a Personal Access Token (classic)
-    # with 'repo' scope: https://github.com/settings/tokens/new
-    integrations:
-      github:
-        - host: github.com
-          token: ${GITHUB_TOKEN}
 
-  # Resource requests and limits
   resources:
     requests:
       cpu: 250m
@@ -79,20 +88,21 @@ service:
   ports:
     backend: 7007
 
-# --- Ingress (disabled for local Kind cluster) ---
+# --- Ingress (disabled — use port-forward for Kind) ---
 ingress:
   enabled: false
 
 # --- PostgreSQL (Bitnami subchart) ---
+# Provides persistent catalog storage instead of the default SQLite :memory:
 postgresql:
   enabled: true
   auth:
     username: backstage
-    password: ChangeMe123!
+    password: backstage
     database: backstage
   primary:
     persistence:
-      enabled: false          # Disable PVC for Kind (no default StorageClass)
+      enabled: false    # No default StorageClass in Kind
 
 # --- Service Account ---
 serviceAccount:
