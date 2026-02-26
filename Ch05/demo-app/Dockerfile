@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for the platform demo application
 # Stage 1: Builder (if needed for future enhancements)
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /tmp
 RUN pip install --user --no-cache-dir flask
@@ -20,8 +20,8 @@ WORKDIR /app
 # Copy dependencies from builder
 COPY --from=builder /root/.local /home/appuser/.local
 
-# Copy application code
-COPY app.py /app/app.py
+# Copy application code (owned by appuser so non-root user can read it)
+COPY --chown=appuser:appuser app.py /app/app.py
 
 # Set environment
 ENV PATH=/home/appuser/.local/bin:$PATH
@@ -39,4 +39,4 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
 EXPOSE 5000
 
 # Run application
-CMD ["python", "-m", "flask", "run", "--host=0.0.0.0"]
+CMD ["python", "app.py"]

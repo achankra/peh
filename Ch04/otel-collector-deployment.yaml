@@ -55,18 +55,18 @@ data:
             from_attribute: k8s.node.name
             action: insert
       resourcedetection:
-        detectors: [k8s, docker, env, system]
+        detectors: [env, system]
         timeout: 5s
 
     exporters:
       prometheus:
         endpoint: "0.0.0.0:8889"
-      jaeger:
-        endpoint: jaeger-collector:14250
+      otlp/jaeger:
+        endpoint: jaeger-collector:4317
         tls:
           insecure: true
-      logging:
-        loglevel: info
+      debug:
+        verbosity: basic
 
     extensions:
       health_check:
@@ -78,11 +78,11 @@ data:
         metrics:
           receivers: [otlp, prometheus]
           processors: [memory_limiter, batch, attributes, resourcedetection]
-          exporters: [prometheus, logging]
+          exporters: [prometheus, debug]
         traces:
           receivers: [otlp]
           processors: [memory_limiter, batch, attributes, resourcedetection]
-          exporters: [jaeger, logging]
+          exporters: [otlp/jaeger, debug]
 
 ---
 # RBAC: ServiceAccount for OTEL Collector
@@ -197,7 +197,7 @@ spec:
       containers:
         - name: otel-collector
           # Use otel/opentelemetry-collector-k8s image for Kubernetes support
-          image: otel/opentelemetry-collector-k8s:0.88.0
+          image: otel/opentelemetry-collector-contrib:0.98.0
           imagePullPolicy: IfNotPresent
 
           # Ports exposed by collector

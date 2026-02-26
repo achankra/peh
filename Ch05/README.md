@@ -39,8 +39,10 @@ This section maps each code file to its corresponding section and concept in Cha
 **Chapter Section**: 5.3 - Deploying as a user
 **Concepts**: Container security best practices, multi-stage builds, non-root users, health checks
 **Purpose**: Multi-stage Dockerfile following security best practices for containerizing the demo app:
-- Stage 1 (Builder): Installs dependencies
-- Stage 2 (Runtime): Python slim base image, non-root user (appuser:1000), health check configuration
+- Stage 1 (Builder): Installs Flask dependencies
+- Stage 2 (Runtime): Python 3.11 slim base, non-root user (appuser:1000), health check configuration
+- Uses `--chown=appuser:appuser` on COPY to ensure the non-root user can read the app file
+- Runs `python app.py` directly (not Flask CLI) for reliable startup
 - Includes HEALTHCHECK directive for container orchestration
 - Avoids running as root (security principle)
 - Minimizes final image size
@@ -461,16 +463,18 @@ curl http://localhost:5000/items
 **Objective**: Deploy the demo app to a Kubernetes cluster
 
 **Prerequisites**:
-- Kubernetes cluster running (minikube or cloud)
+- Kubernetes cluster running (Kind or cloud)
 - kubectl configured to access the cluster
-- Docker image pushed to registry (or use local images for minikube)
 
 **Commands**:
 
 **Option A - Using kubectl directly**:
 ```bash
-# For minikube with local images
-minikube image build -t platform-demo-app:latest demo-app/
+# Build the Docker image locally
+docker build -t platform-demo-app:latest demo-app/
+
+# Load the image into Kind (Kind can't pull from local Docker daemon)
+kind load docker-image platform-demo-app:latest --name peh
 
 # Apply manifests
 kubectl apply -f demo-app/k8s-manifests.yaml
@@ -580,7 +584,7 @@ python devex-survey.py
 
 **Objective**: Identify friction points in the deployment workflow
 
-**Prepare Workflow Definition** (save as `workflow.yaml`):
+**Workflow Definition** (`workflow.yaml` is included in this directory — a 15-step platform deployment workflow). Here is a simplified example of the format:
 ```yaml
 workflow:
   name: "Deploy to Production"

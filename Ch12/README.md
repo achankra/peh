@@ -92,12 +92,25 @@ Before deploying the code in this chapter, ensure you have the following prerequ
 - **Helm 3**: Required for installing OpenCost, Karpenter, and VPA
 
 ### Observability and Metrics
-- **Prometheus**: Deployed in your cluster (from Chapter 11). OpenCost scrapes Prometheus for cost metrics
-- **Metrics Server**: Required for HPA to function. The examples reference CPU and memory utilization metrics
+- **Prometheus**: Deployed in your cluster (from Chapter 4). OpenCost scrapes Prometheus for cost metrics.
+  ```bash
+  # Deploy if not already installed (e.g., after a Kind cluster restart):
+  helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+  helm repo update
+  helm install monitoring prometheus-community/kube-prometheus-stack \
+    --namespace monitoring --create-namespace
+  # If already installed, this will error with "cannot re-use a name" — that's fine.
+  ```
+- **Metrics Server**: Required for HPA and VPA to function. The examples reference CPU and memory utilization metrics.
   ```bash
   # Install if not present:
   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
   ```
+  > **Kind cluster note:** Metrics Server may fail on Kind without the `--kubelet-insecure-tls` flag. If `kubectl top nodes` fails, patch the deployment:
+  > ```bash
+  > kubectl patch deployment metrics-server -n kube-system --type='json' \
+  >   -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+  > ```
 
 ### Cost Observability
 - **OpenCost**: CNCF sandbox project for Kubernetes cost allocation (installed via `install-opencost.sh`)

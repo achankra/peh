@@ -270,19 +270,19 @@ def create_flask_app():
         return None
 
 
-if __name__ == "__main__":
-    # Try to use Flask if available, otherwise fall back to raw WSGI
-    flask_app = create_flask_app()
+# Module-level Flask app for Flask CLI discovery (FLASK_APP=app.py)
+app = create_flask_app()
 
-    if flask_app:
+if __name__ == "__main__":
+    if app:
         print("Starting Flask application on http://0.0.0.0:5000")
-        flask_app.run(host="0.0.0.0", port=5000, debug=False)
+        app.run(host="0.0.0.0", port=5000, debug=False)
     else:
         print("Flask not installed. Install with: pip install flask")
         print("Attempting to run with wsgiref (WSGI reference server)...")
         from wsgiref.simple_server import make_server
 
-        app = Application()
-        server = make_server("0.0.0.0", 5000, app)
+        wsgi_app = Application()
+        server = make_server("0.0.0.0", 5000, wsgi_app)
         print("Starting application on http://0.0.0.0:5000")
         server.serve_forever()

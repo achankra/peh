@@ -558,15 +558,53 @@ export HOSTNAME="worker-1"
 
 This section provides detailed instructions for running each component in the recommended order.
 
+### Phase 0: Deploy Monitoring Stack (Prometheus + Grafana)
+
+The observability stack requires Prometheus and Grafana running in-cluster. Deploy them first if not already installed:
+
+```bash
+# Deploy kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm install monitoring prometheus-community/kube-prometheus-stack \
+  --namespace monitoring --create-namespace
+
+# Wait for pods to be ready (1-2 minutes)
+kubectl get pods -n monitoring
+
+# Port-forward Prometheus and Grafana for local access
+kubectl port-forward -n monitoring svc/prometheus-operated 9090:9090 &
+kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80 &
+
+# Retrieve the Grafana admin password
+kubectl get secret monitoring-grafana -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d; echo
+```
+
+Open [http://localhost:3000](http://localhost:3000) and log in with username `admin` and the password from the command above.
+
+> **Note:** If the monitoring stack is already installed (e.g., from Chapter 2 via Flux), the `helm install` command will error with "cannot re-use a name that is still in use" — that's fine, it means the stack is already running. If you've recreated your Kind cluster (e.g., after a Docker restart), you will need to redeploy — see the main [README](../../README.md#surviving-docker--kind-restarts) for details.
+
+**Expected Output:**
+```
+NAME                                                     READY   STATUS    RESTARTS   AGE
+alertmanager-monitoring-kube-prometheus-alertmanager-0    2/2     Running   0          2m
+monitoring-grafana-xxxxx                                 3/3     Running   0          2m
+monitoring-kube-prometheus-operator-xxxxx                 1/1     Running   0          2m
+monitoring-kube-state-metrics-xxxxx                       1/1     Running   0          2m
+prometheus-monitoring-kube-prometheus-prometheus-0         2/2     Running   0          2m
+```
+
 ### Phase 1: Infrastructure Setup (Kubernetes)
 
 If running on Kubernetes, deploy the OTEL Collector first:
+
+> **Note:** The deployment uses `otel/opentelemetry-collector-contrib:0.98.0`. The config uses the `debug` exporter (replaces the deprecated `logging` exporter) and `otlp/jaeger` (replaces the removed native `jaeger` exporter — Jaeger now accepts OTLP natively on port 4317).
 
 ```bash
 # Create observability namespace and deploy OTEL Collector
 kubectl apply -f otel-collector-deployment.yaml
 
-# Wait for DaemonSet to be ready
+# Wait for DaemonSet to be ready (readiness probe has a 30s initial delay)
 kubectl wait --for=condition=ready pod \
   -l app=otel-collector \
   -n observability \
@@ -576,7 +614,10 @@ kubectl wait --for=condition=ready pod \
 kubectl get pods -n observability
 kubectl logs -l app=otel-collector -n observability
 
-# Port-forward for local testing (optional)
+# Port-forward the OTel Collector so locally-run apps can export traces
+# Without this, apps running on your machine cannot reach the collector
+# inside the Kind cluster and you will see "Failed to export traces to
+# localhost:4317, error code: StatusCode.UNAVAILABLE" errors.
 kubectl port-forward -n observability svc/otel-collector 4317:4317 &
 ```
 

@@ -1,290 +1,298 @@
 # Prometheus Alert Rules for Platform Observability
 # Chapter 4: Embedding Observability
-# 
+#
 # These rules define critical alerts for platform health, based on the 3 pillars:
 # - Metrics (latency, error rates, resource utilization)
 # - Logs (errors, warnings)
 # - Traces (failed requests, slow spans)
+#
+# Deployed as a PrometheusRule CRD (requires kube-prometheus-stack)
 
-groups:
-  - name: "http_service_alerts"
-    interval: 30s
-    rules:
-      # Alert: High Error Rate
-      - alert: HighErrorRate
-        expr: |
-          (sum(rate(http_requests_total{status=~"5.."}[5m])) by (job, instance)) / 
-          (sum(rate(http_requests_total[5m])) by (job, instance)) > 0.05
-        for: 5m
-        labels:
-          severity: critical
-          component: http_service
-        annotations:
-          summary: "High error rate detected on {{ $labels.job }}"
-          description: "Error rate is {{ $value | humanizePercentage }} for {{ $labels.instance }}"
-          dashboard: "http://grafana:3000/d/platform-health"
-          trace: "http://jaeger:16686/search?service={{ $labels.job }}"
-      
-      # Alert: P99 Latency High
-      - alert: HighP99Latency
-        expr: |
-          histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) > 1.0
-        for: 5m
-        labels:
-          severity: warning
-          component: http_service
-        annotations:
-          summary: "P99 latency is high on {{ $labels.job }}"
-          description: "P99 latency is {{ $value }}s (threshold: 1.0s)"
-          runbook: "https://wiki.example.com/runbooks/latency-troubleshooting"
-      
-      # Alert: P95 Latency High (SRE level alert)
-      - alert: HighP95Latency
-        expr: |
-          histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[1m])) > 0.5
-        for: 10m
-        labels:
-          severity: warning
-          component: http_service
-          team: sre
-        annotations:
-          summary: "P95 latency elevated on {{ $labels.job }}"
-          description: "P95 latency is {{ $value }}s for service {{ $labels.job }}"
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: platform-observability-alerts
+  namespace: monitoring
+  labels:
+    release: monitoring          # must match kube-prometheus-stack release name
+    app.kubernetes.io/part-of: kube-prometheus-stack
+spec:
+  groups:
+    - name: "http_service_alerts"
+      interval: 30s
+      rules:
+        # Alert: High Error Rate
+        - alert: HighErrorRate
+          expr: |
+            (sum(rate(http_requests_total{status=~"5.."}[5m])) by (job, instance)) /
+            (sum(rate(http_requests_total[5m])) by (job, instance)) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            component: http_service
+          annotations:
+            summary: "High error rate detected on {{ $labels.job }}"
+            description: "Error rate is {{ $value | humanizePercentage }} for {{ $labels.instance }}"
+            dashboard: "http://grafana:3000/d/platform-health"
+            trace: "http://jaeger:16686/search?service={{ $labels.job }}"
 
-  - name: "kubernetes_alerts"
-    interval: 30s
-    rules:
-      # Alert: Pod Restart Loop
-      - alert: PodRestartingLoop
-        expr: |
-          rate(kube_pod_container_status_restarts_total[15m]) > 0.1
-        for: 5m
-        labels:
-          severity: critical
-          component: kubernetes
-        annotations:
-          summary: "Pod {{ $labels.pod }} is restarting frequently"
-          description: "Pod {{ $labels.pod }} in {{ $labels.namespace }} has restarted {{ $value }} times/min"
-          kubectl: "kubectl -n {{ $labels.namespace }} describe pod {{ $labels.pod }}"
-          logs: "kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} --tail=100"
-      
-      # Alert: Pod Not Ready
-      - alert: PodNotReady
-        expr: |
-          sum(kube_pod_status_ready{condition="false"}) by (pod, namespace) > 0
-        for: 10m
-        labels:
-          severity: critical
-          component: kubernetes
-        annotations:
-          summary: "Pod {{ $labels.pod }} is not ready"
-          description: "Pod {{ $labels.pod }} in {{ $labels.namespace }} has been not ready for 10 minutes"
-      
-      # Alert: Node Pressure
-      - alert: NodePressure
-        expr: |
-          kube_node_status_condition{condition=~"MemoryPressure|DiskPressure",status="true"} > 0
-        for: 5m
-        labels:
-          severity: critical
-          component: kubernetes
-        annotations:
-          summary: "Node {{ $labels.node }} experiencing {{ $labels.condition }}"
-          description: "Node {{ $labels.node }} has been under {{ $labels.condition }} for 5 minutes"
-          kubectl: "kubectl describe node {{ $labels.node }}"
-      
-      # Alert: Node CPU High
-      - alert: NodeHighCPU
-        expr: |
-          (100 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) by (instance) * 100) > 85
-        for: 10m
-        labels:
-          severity: warning
-          component: kubernetes
-          team: sre
-        annotations:
-          summary: "Node {{ $labels.instance }} CPU usage is high"
-          description: "Node {{ $labels.instance }} CPU usage is {{ $value }}%"
-      
-      # Alert: Node Memory High
-      - alert: NodeHighMemory
-        expr: |
-          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
-        for: 10m
-        labels:
-          severity: warning
-          component: kubernetes
-          team: sre
-        annotations:
-          summary: "Node {{ $labels.instance }} memory usage is high"
-          description: "Node {{ $labels.instance }} memory usage is {{ $value }}%"
+        # Alert: P99 Latency High
+        - alert: HighP99Latency
+          expr: |
+            histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) > 1.0
+          for: 5m
+          labels:
+            severity: warning
+            component: http_service
+          annotations:
+            summary: "P99 latency is high on {{ $labels.job }}"
+            description: "P99 latency is {{ $value }}s (threshold: 1.0s)"
+            runbook: "https://wiki.example.com/runbooks/latency-troubleshooting"
 
-  - name: "otel_collector_alerts"
-    interval: 30s
-    rules:
-      # Alert: OTEL Collector Down
-      - alert: OTELCollectorDown
-        expr: |
-          up{job="otel-collector"} == 0
-        for: 2m
-        labels:
-          severity: critical
-          component: observability
-        annotations:
-          summary: "OTEL Collector is down"
-          description: "OTEL Collector instance {{ $labels.instance }} has been down for 2 minutes"
-          check: "kubectl get pods -l app=otel-collector -n observability"
-      
-      # Alert: OTEL Collector Memory High
-      - alert: OTELCollectorHighMemory
-        expr: |
-          container_memory_usage_bytes{pod=~"otel-collector.*"} / 
-          container_spec_memory_limit_bytes{pod=~"otel-collector.*"} > 0.8
-        for: 5m
-        labels:
-          severity: warning
-          component: observability
-        annotations:
-          summary: "OTEL Collector memory usage is high"
-          description: "OTEL Collector {{ $labels.pod }} memory is {{ $value | humanizePercentage }}"
-          action: "Check OTEL Collector configuration for excessive batch sizes"
-      
-      # Alert: OTEL Collector Dropped Spans
-      - alert: OTELCollectorSpanDropped
-        expr: |
-          rate(otelcol_receiver_accepted_spans{receiver="otlp"}[5m]) - 
-          rate(otelcol_exporter_sent_spans{exporter="jaeger"}[5m]) > 100
-        for: 5m
-        labels:
-          severity: warning
-          component: observability
-        annotations:
-          summary: "OTEL Collector is dropping spans"
-          description: "OTEL Collector is dropping {{ $value }} spans/sec"
-          check: "Review OTEL Collector logs for export failures"
+        # Alert: P95 Latency High (SRE level alert)
+        - alert: HighP95Latency
+          expr: |
+            histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[1m])) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+            component: http_service
+            team: sre
+          annotations:
+            summary: "P95 latency elevated on {{ $labels.job }}"
+            description: "P95 latency is {{ $value }}s for service {{ $labels.job }}"
 
-  - name: "platform_business_alerts"
-    interval: 1m
-    rules:
-      # Alert: SLA Violation
-      - alert: SLAViolation
-        expr: |
-          (sum(rate(http_requests_total{status=~"2.."}[5m])) by (job)) / 
-          (sum(rate(http_requests_total[5m])) by (job)) < 0.99
-        for: 10m
-        labels:
-          severity: critical
-          component: business
-          team: management
-        annotations:
-          summary: "SLA violation for {{ $labels.job }}"
-          description: "Service availability is {{ $value | humanizePercentage }} (SLA: 99%)"
-          escalate: "VP of Engineering"
-      
-      # Alert: High Error Rate (Business Impact)
-      - alert: ServiceDegraded
-        expr: |
-          (sum(rate(http_requests_total{status=~"5.."}[5m])) by (job)) / 
-          (sum(rate(http_requests_total[5m])) by (job)) > 0.01
-        for: 5m
-        labels:
-          severity: warning
-          component: business
-          team: management
-        annotations:
-          summary: "Service {{ $labels.job }} is degraded"
-          description: "Error rate is {{ $value | humanizePercentage }}"
-          status: "Investigating root cause via dashboard and traces"
+    - name: "kubernetes_alerts"
+      interval: 30s
+      rules:
+        # Alert: Pod Restart Loop
+        - alert: PodRestartingLoop
+          expr: |
+            rate(kube_pod_container_status_restarts_total[15m]) > 0.1
+          for: 5m
+          labels:
+            severity: critical
+            component: kubernetes
+          annotations:
+            summary: "Pod {{ $labels.pod }} is restarting frequently"
+            description: "Pod {{ $labels.pod }} in {{ $labels.namespace }} has restarted {{ $value }} times/min"
+            kubectl: "kubectl -n {{ $labels.namespace }} describe pod {{ $labels.pod }}"
+            logs: "kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} --tail=100"
 
-  - name: "security_and_compliance_alerts"
-    interval: 5m
-    rules:
-      # Alert: CVE Detected
-      - alert: CVEDetected
-        expr: |
-          cve_vulnerability_count > 0
-        for: 1m
-        labels:
-          severity: critical
-          component: security
-          team: security
-        annotations:
-          summary: "New CVE detected in deployed images"
-          description: "{{ $value }} vulnerabilities detected"
-          dashboard: "http://grafana:3000/d/cve-dashboard"
-      
-      # Alert: Unauthorized Access Attempt
-      - alert: UnauthorizedAccessAttempt
-        expr: |
-          sum(rate(http_requests_total{status="401"}[5m])) by (job) > 10
-        for: 2m
-        labels:
-          severity: warning
-          component: security
-          team: security
-        annotations:
-          summary: "High rate of 401 Unauthorized on {{ $labels.job }}"
-          description: "{{ $value }} unauthorized requests/sec"
-          action: "Review logs for potential security incident"
-      
-      # Alert: Suspicious Activity
-      - alert: SuspiciousActivity
-        expr: |
-          sum(rate(http_requests_total{status=~"403|404"}[5m])) by (job) > 50
-        for: 5m
-        labels:
-          severity: warning
-          component: security
-          team: security
-        annotations:
-          summary: "Suspicious activity detected on {{ $labels.job }}"
-          description: "High rate of forbidden/not-found requests: {{ $value }}/sec"
+        # Alert: Pod Not Ready
+        - alert: PodNotReady
+          expr: |
+            sum(kube_pod_status_ready{condition="false"}) by (pod, namespace) > 0
+          for: 10m
+          labels:
+            severity: critical
+            component: kubernetes
+          annotations:
+            summary: "Pod {{ $labels.pod }} is not ready"
+            description: "Pod {{ $labels.pod }} in {{ $labels.namespace }} has been not ready for 10 minutes"
 
-  - name: "deployment_and_rollout_alerts"
-    interval: 1m
-    rules:
-      # Alert: Deployment Stuck
-      - alert: DeploymentStuck
-        expr: |
-          changes(deployment_status_observed_generation[15m]) == 0 and 
-          deployment_status_replicas_updated < deployment_spec_replicas
-        for: 15m
-        labels:
-          severity: critical
-          component: deployment
-        annotations:
-          summary: "Deployment {{ $labels.deployment }} is stuck"
-          description: "Deployment has not progressed for 15 minutes"
-          kubectl: "kubectl rollout status deployment/{{ $labels.deployment }} -n {{ $labels.namespace }}"
-      
-      # Alert: Canary Deployment Rollback
-      - alert: CanaryDeploymentRollback
-        expr: |
-          rate(http_requests_total{status=~"5.."}[2m]) > 0.05 and deployment_strategy="canary"
-        for: 2m
-        labels:
-          severity: critical
-          component: deployment
-        annotations:
-          summary: "Canary deployment {{ $labels.deployment }} should rollback"
-          description: "Error rate {{ $value | humanizePercentage }} exceeds canary threshold"
-          action: "Initiate automated rollback"
+        # Alert: Node Pressure
+        - alert: NodePressure
+          expr: |
+            kube_node_status_condition{condition=~"MemoryPressure|DiskPressure",status="true"} > 0
+          for: 5m
+          labels:
+            severity: critical
+            component: kubernetes
+          annotations:
+            summary: "Node {{ $labels.node }} experiencing {{ $labels.condition }}"
+            description: "Node {{ $labels.node }} has been under {{ $labels.condition }} for 5 minutes"
+            kubectl: "kubectl describe node {{ $labels.node }}"
 
-# Recording Rules - Pre-compute common metrics for faster dashboard queries
-# Recording rules are evaluated every 15 seconds and stored in Prometheus
-rules:
-  - name: "http_service_metrics"
-    interval: 15s
-    rules:
-      - record: "http_requests:rate5m"
-        expr: "sum(rate(http_requests_total[5m])) by (job, instance)"
-      
-      - record: "http_errors:rate5m"
-        expr: "sum(rate(http_requests_total{status=~\"5..\"}[5m])) by (job, instance)"
-      
-      - record: "http_latency:p99"
-        expr: "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))"
-      
-      - record: "http_latency:p95"
-        expr: "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))"
+        # Alert: Node CPU High
+        - alert: NodeHighCPU
+          expr: |
+            (100 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) by (instance) * 100) > 85
+          for: 10m
+          labels:
+            severity: warning
+            component: kubernetes
+            team: sre
+          annotations:
+            summary: "Node {{ $labels.instance }} CPU usage is high"
+            description: "Node {{ $labels.instance }} CPU usage is {{ $value }}%"
 
+        # Alert: Node Memory High
+        - alert: NodeHighMemory
+          expr: |
+            (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+          for: 10m
+          labels:
+            severity: warning
+            component: kubernetes
+            team: sre
+          annotations:
+            summary: "Node {{ $labels.instance }} memory usage is high"
+            description: "Node {{ $labels.instance }} memory usage is {{ $value }}%"
+
+    - name: "otel_collector_alerts"
+      interval: 30s
+      rules:
+        # Alert: OTEL Collector Down
+        - alert: OTELCollectorDown
+          expr: |
+            up{job="otel-collector"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: observability
+          annotations:
+            summary: "OTEL Collector is down"
+            description: "OTEL Collector instance {{ $labels.instance }} has been down for 2 minutes"
+            check: "kubectl get pods -l app=otel-collector -n observability"
+
+        # Alert: OTEL Collector Memory High
+        - alert: OTELCollectorHighMemory
+          expr: |
+            container_memory_usage_bytes{pod=~"otel-collector.*"} /
+            container_spec_memory_limit_bytes{pod=~"otel-collector.*"} > 0.8
+          for: 5m
+          labels:
+            severity: warning
+            component: observability
+          annotations:
+            summary: "OTEL Collector memory usage is high"
+            description: "OTEL Collector {{ $labels.pod }} memory is {{ $value | humanizePercentage }}"
+            action: "Check OTEL Collector configuration for excessive batch sizes"
+
+        # Alert: OTEL Collector Dropped Spans
+        - alert: OTELCollectorSpanDropped
+          expr: |
+            rate(otelcol_receiver_accepted_spans{receiver="otlp"}[5m]) -
+            rate(otelcol_exporter_sent_spans{exporter="jaeger"}[5m]) > 100
+          for: 5m
+          labels:
+            severity: warning
+            component: observability
+          annotations:
+            summary: "OTEL Collector is dropping spans"
+            description: "OTEL Collector is dropping {{ $value }} spans/sec"
+            check: "Review OTEL Collector logs for export failures"
+
+    - name: "platform_business_alerts"
+      interval: 1m
+      rules:
+        # Alert: SLA Violation
+        - alert: SLAViolation
+          expr: |
+            (sum(rate(http_requests_total{status=~"2.."}[5m])) by (job)) /
+            (sum(rate(http_requests_total[5m])) by (job)) < 0.99
+          for: 10m
+          labels:
+            severity: critical
+            component: business
+            team: management
+          annotations:
+            summary: "SLA violation for {{ $labels.job }}"
+            description: "Service availability is {{ $value | humanizePercentage }} (SLA: 99%)"
+            escalate: "VP of Engineering"
+
+        # Alert: High Error Rate (Business Impact)
+        - alert: ServiceDegraded
+          expr: |
+            (sum(rate(http_requests_total{status=~"5.."}[5m])) by (job)) /
+            (sum(rate(http_requests_total[5m])) by (job)) > 0.01
+          for: 5m
+          labels:
+            severity: warning
+            component: business
+            team: management
+          annotations:
+            summary: "Service {{ $labels.job }} is degraded"
+            description: "Error rate is {{ $value | humanizePercentage }}"
+            status: "Investigating root cause via dashboard and traces"
+
+    - name: "security_and_compliance_alerts"
+      interval: 5m
+      rules:
+        # Alert: CVE Detected
+        - alert: CVEDetected
+          expr: |
+            cve_vulnerability_count > 0
+          for: 1m
+          labels:
+            severity: critical
+            component: security
+            team: security
+          annotations:
+            summary: "New CVE detected in deployed images"
+            description: "{{ $value }} vulnerabilities detected"
+            dashboard: "http://grafana:3000/d/cve-dashboard"
+
+        # Alert: Unauthorized Access Attempt
+        - alert: UnauthorizedAccessAttempt
+          expr: |
+            sum(rate(http_requests_total{status="401"}[5m])) by (job) > 10
+          for: 2m
+          labels:
+            severity: warning
+            component: security
+            team: security
+          annotations:
+            summary: "High rate of 401 Unauthorized on {{ $labels.job }}"
+            description: "{{ $value }} unauthorized requests/sec"
+            action: "Review logs for potential security incident"
+
+        # Alert: Suspicious Activity
+        - alert: SuspiciousActivity
+          expr: |
+            sum(rate(http_requests_total{status=~"403|404"}[5m])) by (job) > 50
+          for: 5m
+          labels:
+            severity: warning
+            component: security
+            team: security
+          annotations:
+            summary: "Suspicious activity detected on {{ $labels.job }}"
+            description: "High rate of forbidden/not-found requests: {{ $value }}/sec"
+
+    - name: "deployment_and_rollout_alerts"
+      interval: 1m
+      rules:
+        # Alert: Deployment Stuck
+        - alert: DeploymentStuck
+          expr: |
+            changes(deployment_status_observed_generation[15m]) == 0 and
+            deployment_status_replicas_updated < deployment_spec_replicas
+          for: 15m
+          labels:
+            severity: critical
+            component: deployment
+          annotations:
+            summary: "Deployment {{ $labels.deployment }} is stuck"
+            description: "Deployment has not progressed for 15 minutes"
+            kubectl: "kubectl rollout status deployment/{{ $labels.deployment }} -n {{ $labels.namespace }}"
+
+        # Alert: Canary Deployment Rollback
+        - alert: CanaryDeploymentRollback
+          expr: |
+            rate(http_requests_total{status=~"5..",deployment_strategy="canary"}[2m]) > 0.05
+          for: 2m
+          labels:
+            severity: critical
+            component: deployment
+          annotations:
+            summary: "Canary deployment {{ $labels.deployment }} should rollback"
+            description: "Error rate {{ $value | humanizePercentage }} exceeds canary threshold"
+            action: "Initiate automated rollback"
+
+    # Recording Rules - Pre-compute common metrics for faster dashboard queries
+    - name: "http_service_metrics"
+      interval: 15s
+      rules:
+        - record: "http_requests:rate5m"
+          expr: "sum(rate(http_requests_total[5m])) by (job, instance)"
+
+        - record: "http_errors:rate5m"
+          expr: "sum(rate(http_requests_total{status=~\"5..\"}[5m])) by (job, instance)"
+
+        - record: "http_latency:p99"
+          expr: "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))"
+
+        - record: "http_latency:p95"
+          expr: "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))"

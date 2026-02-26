@@ -1,0 +1,127 @@
+# Developer Workflow Definition
+# Chapter 5: Evaluate the User Experience
+#
+# This defines a typical platform deployment workflow for friction analysis.
+# Each step captures whether it's manual/automated, time cost, cognitive load,
+# and dependencies — enabling the friction-analyzer to quantify developer toil.
+
+workflow:
+  name: "Platform Service Deployment"
+  description: "End-to-end workflow for deploying a service on the internal platform"
+  steps:
+    - name: "Write Code"
+      manual: true
+      time_minutes: 60
+      cognitive_load: 3
+      has_feedback: true
+      error_prone: false
+
+    - name: "Run Local Tests"
+      semi_automated: true
+      time_minutes: 5
+      cognitive_load: 2
+      has_feedback: true
+      error_prone: false
+      dependencies: ["Write Code"]
+
+    - name: "Create Dockerfile"
+      manual: true
+      time_minutes: 15
+      cognitive_load: 4
+      has_feedback: false
+      error_prone: true
+
+    - name: "Build Container Image"
+      automated: true
+      time_minutes: 3
+      cognitive_load: 1
+      has_feedback: true
+      error_prone: false
+      dependencies: ["Create Dockerfile"]
+
+    - name: "Write Kubernetes Manifests"
+      manual: true
+      time_minutes: 20
+      cognitive_load: 5
+      has_feedback: false
+      error_prone: true
+
+    - name: "Configure Networking"
+      manual: true
+      time_minutes: 15
+      cognitive_load: 5
+      has_feedback: false
+      error_prone: true
+      dependencies: ["Write Kubernetes Manifests"]
+
+    - name: "Set Up Observability"
+      semi_automated: true
+      time_minutes: 10
+      cognitive_load: 3
+      has_feedback: true
+      error_prone: false
+      dependencies: ["Write Kubernetes Manifests"]
+
+    - name: "Push to Git"
+      automated: true
+      time_minutes: 2
+      cognitive_load: 1
+      has_feedback: true
+      error_prone: false
+      dependencies: ["Run Local Tests"]
+
+    - name: "CI Pipeline"
+      automated: true
+      time_minutes: 8
+      cognitive_load: 1
+      has_feedback: true
+      error_prone: false
+      dependencies: ["Push to Git", "Build Container Image"]
+
+    - name: "Security Scan"
+      automated: true
+      time_minutes: 5
+      cognitive_load: 1
+      has_feedback: true
+      error_prone: false
+      dependencies: ["CI Pipeline"]
+
+    - name: "Deploy to Staging"
+      semi_automated: true
+      time_minutes: 10
+      cognitive_load: 3
+      has_feedback: true
+      error_prone: false
+      dependencies: ["CI Pipeline", "Configure Networking", "Set Up Observability"]
+
+    - name: "Manual QA Testing"
+      manual: true
+      time_minutes: 30
+      cognitive_load: 4
+      has_feedback: true
+      error_prone: true
+      dependencies: ["Deploy to Staging"]
+
+    - name: "Request Production Approval"
+      manual: true
+      time_minutes: 15
+      cognitive_load: 2
+      has_feedback: false
+      error_prone: false
+      dependencies: ["Manual QA Testing", "Security Scan"]
+
+    - name: "Deploy to Production"
+      semi_automated: true
+      time_minutes: 10
+      cognitive_load: 3
+      has_feedback: true
+      error_prone: true
+      dependencies: ["Request Production Approval"]
+
+    - name: "Verify Production Health"
+      semi_automated: true
+      time_minutes: 10
+      cognitive_load: 3
+      has_feedback: true
+      error_prone: false
+      dependencies: ["Deploy to Production"]
