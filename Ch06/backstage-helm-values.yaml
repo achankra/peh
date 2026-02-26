@@ -1,64 +1,42 @@
 # Backstage Helm Chart Values
-# This configuration deploys Backstage on Kubernetes with production-ready settings
-# Includes PostgreSQL, ingress, and SSO authentication
+# This configuration deploys Backstage on a local Kind cluster for demo purposes.
+# Adapted for the official backstage/backstage Helm chart (v2.x).
+#
+# Chart repo: https://backstage.github.io/charts
+# Docs: https://github.com/backstage/charts
 
-# Image configuration
-image:
-  registry: ghcr.io
-  repository: backstage/backstage
-  tag: "latest"
-  pullPolicy: IfNotPresent
-
-# Number of replicas for high availability
-replicaCount: 2
-
-# Service configuration
-service:
-  type: ClusterIP
-  port: 80
-  targetPort: 7007
-
-# Ingress configuration for external access
-ingress:
-  enabled: true
-  className: nginx
-  annotations:
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-  hosts:
-    - host: backstage.example.com
-      paths:
-        - path: /
-          pathType: Prefix
-  tls:
-    - secretName: backstage-tls
-      hosts:
-        - backstage.example.com
-
-# PostgreSQL Configuration
-postgresql:
-  enabled: true
-  auth:
-    username: backstage
-    password: ChangeMe123!
-    database: backstage
-  primary:
-    persistence:
-      enabled: true
-      size: 10Gi
-      storageClassName: standard
-  service:
-    port: 5432
-
-# Backstage configuration
+# --- Backstage application ---
 backstage:
-  # App configuration (app-config.yaml)
+  replicas: 1
+
+  image:
+    registry: ghcr.io
+    repository: backstage/backstage
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  containerPorts:
+    backend: 7007
+
+  # Extra environment variables passed to the Backstage container
+  extraEnvVars:
+    - name: NODE_ENV
+      value: production
+    - name: LOG_LEVEL
+      value: info
+    - name: GITHUB_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: backstage-github-token
+          key: token
+
+  # Inline app-config overrides (merged with the image's built-in app-config.yaml)
   appConfig:
     app:
-      title: Backstage Developer Portal
-      baseUrl: https://backstage.example.com
+      title: "Backstage Developer Portal"
+      baseUrl: http://localhost:7007
     backend:
-      baseUrl: https://backstage.example.com
+      baseUrl: http://localhost:7007
       listen:
         port: 7007
       database:
@@ -71,126 +49,52 @@ backstage:
           database: backstage
       cache:
         store: memory
+    # Auth — enable guest access for local demo (no SSO/Keycloak in Kind)
+    # In production, replace with OAuth/OIDC provider (see app-config.production.yaml)
+    auth:
+      environment: development
+      providers:
+        guest:
+          dangerouslyAllowOutsideDevelopment: true
+    # GitHub integration — required for catalog registration from GitHub URLs
+    # Replace YOUR_GITHUB_TOKEN with a Personal Access Token (classic)
+    # with 'repo' scope: https://github.com/settings/tokens/new
+    integrations:
+      github:
+        - host: github.com
+          token: ${GITHUB_TOKEN}
 
-  # Frontend configuration
-  frontend:
-    app:
-      title: Backstage Developer Portal
-    baseUrl: https://backstage.example.com
+  # Resource requests and limits
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
 
-  # Core plugins
-  plugins:
-    - name: catalog
-      enabled: true
-    - name: auth
-      enabled: true
-    - name: search
-      enabled: true
-    - name: kubernetes
-      enabled: true
+# --- Kubernetes Service ---
+service:
+  type: ClusterIP
+  ports:
+    backend: 7007
 
-# Environment variables
-env:
-  NODE_ENV: production
-  LOG_LEVEL: info
-
-# Resource requests and limits
-resources:
-  requests:
-    cpu: 250m
-    memory: 512Mi
-  limits:
-    cpu: 500m
-    memory: 1Gi
-
-# Autoscaling configuration
-autoscaling:
-  enabled: true
-  minReplicas: 2
-  maxReplicas: 5
-  targetCPUUtilizationPercentage: 80
-  targetMemoryUtilizationPercentage: 85
-
-# Service Account
-serviceAccount:
-  create: true
-  annotations: {}
-  name: backstage
-
-# RBAC
-rbac:
-  create: true
-
-# Security Context
-securityContext:
-  runAsNonRoot: true
-  runAsUser: 1000
-  fsGroup: 1000
-
-# Network Policies
-networkPolicy:
+# --- Ingress (disabled for local Kind cluster) ---
+ingress:
   enabled: false
 
-# Pod Disruption Budget for high availability
-podDisruptionBudget:
+# --- PostgreSQL (Bitnami subchart) ---
+postgresql:
   enabled: true
-  minAvailable: 1
-
-# Node affinity (optional, for specific node pools)
-affinity: {}
-
-# Tolerations for node taints
-tolerations: []
-
-# Health checks
-livenessProbe:
-  httpGet:
-    path: /healthcheck
-    port: 7007
-  initialDelaySeconds: 30
-  periodSeconds: 10
-  timeoutSeconds: 5
-
-readinessProbe:
-  httpGet:
-    path: /healthcheck
-    port: 7007
-  initialDelaySeconds: 10
-  periodSeconds: 5
-  timeoutSeconds: 3
-
-# OAuth/SSO Configuration (Keycloak)
-oauth:
-  enabled: true
-  provider: keycloak
-  keycloak:
-    realm: backstage
-    clientId: backstage
-    clientSecret: your-client-secret
-    authorizationUrl: https://keycloak.example.com/auth/realms/backstage/protocol/openid-connect/auth
-    tokenUrl: https://keycloak.example.com/auth/realms/backstage/protocol/openid-connect/token
-    userInfoUrl: https://keycloak.example.com/auth/realms/backstage/protocol/openid-connect/userinfo
-
-# Persistent Storage
-persistence:
-  enabled: true
-  storageClassName: standard
-  size: 5Gi
-  mountPath: /var/lib/backstage
-
-# ConfigMap for app-config.yaml
-configMap:
-  enabled: true
-  name: backstage-config
-
-# Secrets for sensitive data
-secrets:
-  enabled: true
-  name: backstage-secrets
-  backend:
-    database:
-      password: ChangeMe123!
   auth:
-    oauth:
-      clientSecret: your-client-secret-here
+    username: backstage
+    password: ChangeMe123!
+    database: backstage
+  primary:
+    persistence:
+      enabled: false          # Disable PVC for Kind (no default StorageClass)
 
+# --- Service Account ---
+serviceAccount:
+  create: true
+  name: backstage

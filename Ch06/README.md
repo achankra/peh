@@ -162,14 +162,21 @@ export GITHUB_TOKEN=ghp_XXXXX
 Install or upgrade Backstage on your Kubernetes cluster:
 
 ```bash
+# Create namespace and GitHub token secret (required for catalog registration from GitHub)
+# Create a GitHub Personal Access Token (classic) with 'repo' scope at:
+# https://github.com/settings/tokens/new
+kubectl create namespace backstage
+kubectl create secret generic backstage-github-token \
+  --namespace backstage \
+  --from-literal=token=$GITHUB_TOKEN
+
 # Add Backstage Helm repository
-helm repo add backstage https://backstage.spotify.com/charts
+helm repo add backstage https://backstage.github.io/charts
 helm repo update
 
-# Install Backstage with custom values
+# Install Backstage with custom values (namespace already created above)
 helm install backstage backstage/backstage \
   --namespace backstage \
-  --create-namespace \
   -f backstage-helm-values.yaml
 
 # Verify deployment
@@ -177,12 +184,16 @@ kubectl get pods -n backstage
 kubectl logs -n backstage -l app=backstage --tail=50
 ```
 
-**Expected output**:
-- 2 Backstage pods running (from `replicaCount: 2`)
-- PostgreSQL pod running
-- Ingress created at backstage.example.com
+> **Note:** The `backstage-helm-values.yaml` references the `backstage-github-token` secret via `GITHUB_TOKEN` env var and `integrations.github` in the app-config. Without this, Backstage cannot fetch `catalog-info.yaml` files from GitHub and will return "Missing credentials" errors during catalog registration.
 
-**Next steps**: Wait 60 seconds for services to stabilize, then test connectivity.
+> **Auth:** The values file enables guest authentication with `auth.providers.guest.dangerouslyAllowOutsideDevelopment: true`. Newer Backstage versions require an explicit auth provider — without this, the UI returns 401 on every API call ("Failed to load entity kinds", "Could not fetch catalog entities"). In production, replace guest auth with OAuth/OIDC (e.g., Keycloak from Chapter 3).
+
+**Expected output**:
+- 1 Backstage pod running
+- PostgreSQL pod running (Bitnami subchart)
+- No ingress (using port-forward for Kind)
+
+**Next steps**: Wait 60 seconds for services to stabilize, then test connectivity via port-forward: `kubectl port-forward -n backstage svc/backstage 7007:7007 &`
 
 ### 4. Verify Portal Health
 
@@ -204,61 +215,52 @@ Expected output: All tests pass (✓)
 
 ### 5. Register Catalog Entities
 
-Register your first services in the Backstage catalog:
+Register your services in the Backstage catalog. The recommended approach for local Kind clusters is to use the Backstage UI directly.
+
+**Option A — Via the Backstage UI (recommended for local/Kind):**
+
+1. Open `http://localhost:7007` in your browser
+2. Click **Create** in the left sidebar → **Register Existing Component**
+3. Paste the catalog-info.yaml URL and click **Analyze**:
+   ```
+   https://github.com/achankra/peh/blob/main/Ch06/catalog-info.yaml
+   ```
+4. Backstage will parse the YAML and discover all entities (Component, API, Resource, User, Group, System, Domain)
+5. Click **Import** to register them
+6. Navigate to **Catalog** to see the registered entities
+
+> **Note:** The vanilla Backstage Helm image does not have API authentication configured, so the `register-catalog-entities.py` script (which sends an `Authorization: Bearer` header) will receive 401 errors. Use the UI approach for local Kind clusters.
+
+**Option B — Via the script (requires Backstage API auth configured):**
 
 ```bash
-# Register a single catalog entity
 python3 register-catalog-entities.py \
-  --backstage-url https://backstage.example.com \
+  --backstage-url $BACKSTAGE_URL \
   --token $BACKSTAGE_API_TOKEN \
-  --entity-url https://raw.githubusercontent.com/your-org/demo-app/main/catalog-info.yaml
-
-# Discover and register from GitHub organization
-python3 register-catalog-entities.py \
-  --backstage-url https://backstage.example.com \
-  --token $BACKSTAGE_API_TOKEN \
-  --github-org your-organization \
-  --github-token $GITHUB_TOKEN
-
-# Register multiple entities from file
-python3 register-catalog-entities.py \
-  --backstage-url https://backstage.example.com \
-  --token $BACKSTAGE_API_TOKEN \
-  --file catalog-urls.txt \
-  --output registration-results.json
-```
-
-**Expected output**:
-```
-Registering entity from: https://raw.githubusercontent.com/your-org/demo-app/main/catalog-info.yaml
-  Successfully registered entity (ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
-============================================================
-REGISTRATION SUMMARY
-============================================================
-Successfully Registered: 1
-Failed: 0
+  --entity-url https://github.com/achankra/peh/blob/main/Ch06/catalog-info.yaml
 ```
 
 **Next steps**: Verify entities appear in Backstage UI by navigating to /catalog.
 
 ### 6. Access the Portal
 
-Open your browser and navigate to your configured domain:
+Open your browser and navigate to Backstage:
 
 ```
-https://backstage.example.com
+http://localhost:7007
 ```
+
+> **Note:** For local Kind clusters, we use `kubectl port-forward -n backstage svc/backstage 7007:7007 &` instead of ingress. For production deployments, configure ingress with your domain and TLS.
 
 **Expected experience**:
-1. Redirected to Keycloak login (SSO integration)
-2. After authentication, see Backstage home page
-3. Navigate to /catalog to see registered services
-4. View service details, APIs, and dependencies
+1. See Backstage home page
+2. Navigate to /catalog to see registered services
+3. View service details, APIs, and dependencies
+4. Click on a component to see ownership, relationships, and API specs
 
 **Troubleshooting**:
-- 404 error: Check ingress configuration and DNS resolution
-- OAuth error: Verify Keycloak realm, client, and redirect URIs
-- Blank catalog: Run step 5 to register entities
+- Blank catalog: Register entities via the UI (step 5 above)
+- Connection refused: Ensure port-forward is running (`kubectl port-forward -n backstage svc/backstage 7007:7007 &`)
 
 ### 7. Create Custom Plugins (Optional)
 
