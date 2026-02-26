@@ -2,37 +2,33 @@
 # Chart repo: https://backstage.github.io/charts
 # Docs: https://github.com/backstage/charts
 #
-# The default Backstage image (ghcr.io/backstage/backstage:latest) ships with
-# a built-in app-config.yaml that already includes:
-#   - auth.environment: development  (guest auth enabled)
-#   - auth.providers.guest: {}       (guest sign-in resolver)
-#   - integrations.github with token: ${GITHUB_TOKEN}
-#   - backend.database: better-sqlite3 :memory:
+# Prerequisites:
+#   1. Create a GitHub Personal Access Token (classic) with 'repo' scope:
+#      https://github.com/settings/tokens/new
+#   2. Export it: export GITHUB_TOKEN=ghp_YourTokenHere
+#   3. Create the Kubernetes secret:
+#      kubectl create namespace backstage
+#      kubectl create secret generic backstage-secrets \
+#        --namespace backstage --from-literal=GITHUB_TOKEN=$GITHUB_TOKEN
 #
-# This values file overrides only what we need for a Kind deployment:
-#   1. Switch the database from SQLite to PostgreSQL (Bitnami subchart)
-#   2. Inject GITHUB_TOKEN from a Kubernetes Secret
-#   3. Set the base URLs to localhost:7007
+# How config loading works:
+#   The default Backstage Docker image ships with a built-in app-config.yaml
+#   that includes guest auth and GitHub integration (reading ${GITHUB_TOKEN}).
+#   By default, the Helm chart ONLY loads its generated ConfigMap, skipping
+#   the built-in config. We use 'args' to load both:
+#     1. /app/app-config.yaml           ← built-in defaults (auth, integrations)
+#     2. /app/app-config-from-configmap.yaml ← our overrides (DB, URLs, etc.)
+#   Later files override earlier ones, so our database/URL settings win.
 #
-# IMPORTANT — Two common gotchas with the vanilla Backstage Helm deployment:
+# What this values file configures:
+#   - Loads built-in config (guest auth + GitHub integration) via args
+#   - PostgreSQL database (persistent catalog storage via Bitnami subchart)
+#   - Base URLs for localhost:7007 (Kind port-forward, no ingress)
+#   - Disables default auth policy (required for guest auth API access)
 #
-#   Gotcha 1: "Failed to load entity kinds" / 401 Unauthorized on Catalog page
-#     The built-in image ships with auth.environment: development and guest
-#     auth enabled, so this works out of the box. If you override the auth
-#     section in appConfig and forget to include guest, you'll get 401 on
-#     every /api/* call. We intentionally preserve the built-in auth config
-#     by NOT overriding the auth section here.
-#
-#   Gotcha 2: "Missing credentials" when registering a GitHub catalog URL
-#     The built-in image has integrations.github configured to read
-#     ${GITHUB_TOKEN} from the environment. The token must actually be
-#     present in the container. We use extraEnvVarsSecrets to inject it
-#     from a Kubernetes Secret called 'backstage-secrets'. The secret key
-#     name (GITHUB_TOKEN) must match the env var name exactly.
-#     Create it with:
-#       kubectl create secret generic backstage-secrets \
-#         --namespace backstage \
-#         --from-literal=GITHUB_TOKEN=ghp_YourTokenHere
+# Common errors if misconfigured:
+#   "401 Unauthorized" on Catalog page → auth section missing or wrong
+#   "Missing credentials" on Register page → GITHUB_TOKEN not in container
 
 # --- Backstage application ---
 backstage:
@@ -47,19 +43,27 @@ backstage:
   containerPorts:
     backend: 7007
 
+  # Load the built-in app-config.yaml FIRST (provides guest auth, GitHub
+  # integration defaults), then layer our ConfigMap overrides on top.
+  # Without this, the Helm chart only loads the ConfigMap and skips the
+  # built-in config, which causes "401 Unauthorized" / "Missing credentials".
+  args:
+    - "--config"
+    - "/app/app-config.yaml"
+    - "--config"
+    - "/app/app-config-from-configmap.yaml"
+
   # Inject GITHUB_TOKEN from Kubernetes Secret into the container.
   # The built-in app-config.yaml reads ${GITHUB_TOKEN} for GitHub integration.
   # extraEnvVarsSecrets injects every key from the named secret as an env var.
   extraEnvVarsSecrets:
     - backstage-secrets
 
-  # Override only the settings that differ from the built-in app-config.yaml.
-  # The Helm chart merges this with the image's default config.
-  # We do NOT override the auth section — the built-in guest auth works as-is.
   appConfig:
     app:
       title: "Platform Engineer's Handbook — Developer Portal"
       baseUrl: http://localhost:7007
+
     backend:
       baseUrl: http://localhost:7007
       listen:
@@ -73,6 +77,37 @@ backstage:
           password: backstage
       cache:
         store: memory
+      # Allow unauthenticated access to API — required for guest auth to work
+      auth:
+        dangerouslyDisableDefaultAuthPolicy: true
+
+    # Guest auth — allows using the portal without login.
+    # Required for local Kind demos. In production, use OAuth/OIDC (Chapter 3).
+    auth:
+      environment: development
+      providers:
+        guest: {}
+
+    # Allow all entity kinds to be registered via URL (default blocks User, Group, etc.)
+    catalog:
+      rules:
+        - allow:
+            - Component
+            - API
+            - System
+            - Domain
+            - Group
+            - Resource
+            - Template
+            - Location
+            - User
+
+    # GitHub integration — lets Backstage fetch catalog-info.yaml from GitHub.
+    # ${GITHUB_TOKEN} is resolved from the container env var at startup.
+    integrations:
+      github:
+        - host: github.com
+          token: ${GITHUB_TOKEN}
 
   resources:
     requests:

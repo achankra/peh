@@ -32,9 +32,7 @@ This directory contains all code listings and configuration examples referenced 
 | `backstage-helm-values.yaml` | 6.1 Backstage Architecture | Kubernetes Helm chart values for production Backstage deployment with PostgreSQL |
 | `catalog-info.yaml` | 6.3 Service catalog examples | Backstage catalog entity definitions (Component, API, Resource, User, Group, System, Domain) |
 | `api-spec.yaml` | 6.3 Service catalog examples | OpenAPI 3.0 specification for demo-app API registration |
-| `portal-evaluation-framework.py` | 6.1 Portal selection | Decision-making framework for evaluating portal solutions (Backstage, Keycloak, Gitea, commercial options) |
 | `register-catalog-entities.py` | 6.4 Publishing deployed services | Script to discover and register catalog entities from GitHub into Backstage |
-| `create-backstage-plugin.py` | 6.5 Extending the portal (implied) | Scaffolding tool for generating complete Backstage plugin structures |
 | `test-portal-health.py` | Validation & health checks | Unit tests for portal configuration and setup |
 
 ### Orphan Files
@@ -123,15 +121,10 @@ For production Backstage deployment:
 
 ### 1. Verify Prerequisites
 
-Before deploying Backstage, validate that all required components are ready:
-
-```bash
-python3 portal-evaluation-framework.py --portals backstage keycloak
-```
-
-Expected output: Comparison table showing Backstage scoring highest for extensibility and community support.
-
-**Next steps**: Ensure Keycloak (Chapter 3) is deployed and accessible at your configured URL.
+Before deploying Backstage, ensure you have:
+- A running Kind cluster (`kubectl cluster-info`)
+- Helm installed (`helm version`)
+- A GitHub Personal Access Token with `repo` scope (see Environment Setup in the CIA guide)
 
 ### 2. Prepare Configuration
 
@@ -184,9 +177,11 @@ kubectl get pods -n backstage
 kubectl logs -n backstage -l app=backstage --tail=50
 ```
 
-> **How the GitHub token works:** The default Backstage image ships with `integrations.github.token: ${GITHUB_TOKEN}` in its built-in app-config. The Helm chart's `extraEnvVarsSecrets` injects every key from the `backstage-secrets` Kubernetes Secret as a container env var. The secret key name (`GITHUB_TOKEN`) must match the env var name exactly. Without this, the catalog registration page shows "Missing credentials" or "401 Unauthorized" when fetching from GitHub.
+> **How config loading works:** By default, the Helm chart generates a ConfigMap (`app-config-from-configmap.yaml`) from `backstage.appConfig` and loads ONLY that file — skipping the image's built-in `app-config.yaml`. The built-in config contains guest auth and GitHub integration defaults. Our values file uses `backstage.args` to load the built-in config first, then our ConfigMap overrides on top. This ensures guest auth and `${GITHUB_TOKEN}` integration work without duplicating them in the values file. If you see "401 Unauthorized" or "Missing credentials", verify the `args` section is present in `backstage-helm-values.yaml`.
 
-> **How auth works:** The default Backstage image ships with guest auth enabled (`auth.environment: development`, `auth.providers.guest: {}`). Our values file deliberately does NOT override the `auth` section, so guest auth works out of the box. If you override `appConfig.auth` and forget to include the guest provider, the Catalog page shows "Failed to load entity kinds" / "401 Unauthorized" on every API call. In production, replace guest auth with OAuth/OIDC (e.g., Keycloak from Chapter 3).
+> **How the GitHub token reaches the container:** The Helm chart's `extraEnvVarsSecrets` injects every key from the `backstage-secrets` Kubernetes Secret as a container env var. The built-in `app-config.yaml` references `${GITHUB_TOKEN}` for GitHub integration, so the secret key name must be exactly `GITHUB_TOKEN`.
+
+> **How auth works:** The built-in `app-config.yaml` enables guest auth (`auth.environment: development`, `auth.providers.guest: {}`). Our ConfigMap adds `backend.auth.dangerouslyDisableDefaultAuthPolicy: true` to allow unauthenticated API access (required for guest mode). In production, replace guest auth with OAuth/OIDC (e.g., Keycloak from Chapter 3).
 
 **Expected output**:
 - 1 Backstage pod running
@@ -262,88 +257,21 @@ http://localhost:7007
 - Blank catalog: Register entities via the UI (step 5 above)
 - Connection refused: Ensure port-forward is running (`kubectl port-forward -n backstage svc/backstage 7007:7007 &`)
 
-### 7. Create Custom Plugins (Optional)
+### 7. Explore Entity Relationships
 
-Extend Backstage with custom plugins for your organization:
+After importing entities, explore how Backstage connects services, APIs, teams, and infrastructure:
 
-```bash
-# Create a frontend plugin for custom dashboards
-python3 create-backstage-plugin.py \
-  --name company-dashboard \
-  --type frontend \
-  --description "Custom analytics dashboard for our platform"
+1. **Component detail page**: Click on `api-gateway` in the Catalog. The Overview tab shows ownership (`platform-team`) and system (`platform-services`). The Relations tab shows the dependency graph — `api-gateway` provides `gateway-api` and depends on `postgres-primary`.
 
-# Create a backend plugin for integration
-python3 create-backstage-plugin.py \
-  --name internal-api-proxy \
-  --type backend \
-  --description "Backend plugin for internal API proxying"
+2. **API definition**: Click on `gateway-api` to see the API entity. The Definition tab renders the OpenAPI spec defined in `catalog-info.yaml`.
 
-# Create a full stack plugin
-python3 create-backstage-plugin.py \
-  --name compliance-checker \
-  --type full \
-  --description "Full-stack plugin for compliance validation"
-  --output-dir ./plugins
-```
+3. **Team ownership**: Click on `platform-team` (the Group entity) to see all components owned by the team.
 
-**Expected output**:
-```
-Scaffolding frontend plugin: company-dashboard
-============================================================
-Created directory structure in ./company-dashboard
-Created package.json
-Created tsconfig.json
-Created manifest.json
-Created README.md
-Created test template
-Created frontend plugin files
-============================================================
+4. **System view**: Click on `platform-services` (the System entity) to see all components, APIs, and resources grouped under this system.
 
-Successfully created company-dashboard plugin!
-Plugin directory: ./company-dashboard
-
-Next steps:
-  1. cd ./company-dashboard
-  2. yarn install
-  3. yarn build
-  4. yarn dev
-```
-
-**Next steps**: Develop plugin in the created directory, then integrate with Backstage app.
+> **Tip:** Use the Kind dropdown on the Catalog page to filter by entity type (Component, API, Resource, Group, User, System, Domain).
 
 ## Key Concepts
-
-### Portal Evaluation Framework
-
-The decision-making framework evaluates portals across multiple dimensions:
-
-1. **Extensibility** (25% weight): Ability to extend with custom plugins and integrations
-2. **Community Support** (20% weight): Active community, documentation, and ecosystem
-3. **SSO/Auth Support** (20% weight): Support for OAuth, SAML, Keycloak
-4. **Catalog Management** (20% weight): Service catalog features and discovery
-5. **Templates & Scaffolding** (15% weight): Project templates and code generation
-
-Run the evaluation framework to compare solutions:
-```bash
-python3 portal-evaluation-framework.py --output-format table
-python3 portal-evaluation-framework.py --output-format json > results.json
-```
-
-### Build vs Buy vs Hybrid Decision
-
-**Backstage (Open Source)**
-- Pros: Highly customizable, strong plugin ecosystem, vendor-agnostic, integration with book stack
-- Cons: Requires operational overhead, plugin maintenance
-- Best for: Organizations with engineering maturity and specific integration needs
-
-**Commercial Solutions** (Port, OpsLevel, Cortex, Harness)
-- Pros: Managed service, guaranteed uptime, professional support
-- Cons: Vendor lock-in, less customization, ongoing licensing costs
-- Best for: Organizations prioritizing operational simplicity
-
-**Hybrid Approach** (Recommended)
-Start with open-source Backstage, evaluate managed solutions after 6-12 months of operation.
 
 ### Portal-of-Peril Warning
 
@@ -412,33 +340,35 @@ Subsequent chapters may reference portal capabilities for discovery and integrat
 
 ### Common Issues
 
-**Backstage pods not starting**
-```bash
-# Check pod logs
-kubectl logs -n backstage -l app=backstage --tail=100
+**Backstage pod stuck at 0/1 Running or CrashLoopBackOff**
+- This is usually a race condition: Backstage started before PostgreSQL was ready
+- Check logs: `kubectl logs deploy/backstage -n backstage --tail=30`
+- If you see "the database system is shutting down" or "Knex: Timeout acquiring a connection", wait for PostgreSQL to be `1/1 Running`, then restart Backstage:
+  ```bash
+  kubectl rollout restart deployment/backstage -n backstage
+  ```
 
-# Check persistent volume
-kubectl get pvc -n backstage
+**"401 Unauthorized" or "Failed to load entity kinds" on Catalog page**
+- The built-in `app-config.yaml` isn't being loaded (guest auth missing)
+- Verify the `args` section in the deployment includes both config files:
+  ```bash
+  kubectl get deployment backstage -n backstage -o jsonpath='{.spec.template.spec.containers[0].args}'
+  ```
+- You should see: `["--config","/app/app-config.yaml","--config","/app/app-config-from-configmap.yaml"]`
 
-# Verify database connectivity
-kubectl exec -it -n backstage backstage-0 -- psql -U backstage -c "SELECT version();"
-```
+**"Missing credentials" on the Register Component page**
+- The GITHUB_TOKEN env var is missing or contains a placeholder
+- Verify: `kubectl get secret backstage-secrets -n backstage -o jsonpath='{.data.GITHUB_TOKEN}' | base64 -d; echo`
+- If wrong, delete and recreate: `kubectl delete secret backstage-secrets -n backstage` then recreate with your real token
+
+**"PASSWORDS ERROR: secret backstage-postgresql does not contain key user-password" on helm upgrade**
+- Stale PostgreSQL secret from a previous install
+- Fix: `kubectl delete secret backstage-postgresql -n backstage` then re-run helm install/upgrade
 
 **Catalog entities not registering**
-- Verify Backstage API token is correct and has permissions
-- Check GitHub token has repo access for discovery
-- Ensure catalog-info.yaml files are valid YAML and contain required `apiVersion` field
-- Review registration output for specific error messages
-
-**OAuth/SSO not working**
-- Verify Keycloak realm and client configuration match app-config settings
-- Check Keycloak metadata URL is accessible from Backstage pod
-- Confirm redirect URI in Keycloak matches `https://backstage.example.com/oauth/callback`
-
-**TLS certificate errors**
-- Verify cert-manager is installed and ingress has annotations
-- Check certificate status: `kubectl describe certificate -n backstage`
-- Re-create ingress if certificate not issued within 5 minutes
+- Ensure catalog-info.yaml entities have all required fields (e.g., Group needs `spec.type` and `spec.children`)
+- Check GitHub token has `repo` scope
+- Verify the catalog URL points to a raw-accessible file on GitHub
 
 ### Getting Help
 
