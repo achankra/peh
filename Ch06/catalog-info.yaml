@@ -139,6 +139,7 @@ spec:
     displayName: Platform Engineering
     email: platform@example.com
     picture: https://example.com/teams/platform.jpg
+  children: []
   members:
     - alice.smith
   parent: engineering-org
