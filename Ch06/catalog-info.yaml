@@ -134,6 +134,7 @@ metadata:
   description: Team responsible for platform infrastructure and developer tools
 
 spec:
+  type: team
   profile:
     displayName: Platform Engineering
     email: platform@example.com

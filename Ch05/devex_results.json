@@ -1,0 +1,22 @@
+{
+  "overall_score": 50,
+  "category_scores": {
+    "Onboarding": 1.5,
+    "Deployment": 2.5,
+    "Documentation": 3.0,
+    "Developer Tools": 2.67,
+    "Feedback Loops": 3.0
+  },
+  "detailed_responses": {
+    "onboarding_time": 1,
+    "onboarding_clarity": 2,
+    "deployment_ease": 3,
+    "deployment_feedback": 2,
+    "documentation_quality": 3,
+    "documentation_clarity": 3,
+    "tooling_satisfaction": 2,
+    "api_design": 2,
+    "error_messages": 4,
+    "feedback_loop": 3
+  }
+}

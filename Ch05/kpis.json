@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-02-26T01:55:59.262414",
+  "namespace": "default",
+  "metrics": {
+    "deployment_frequency": {
+      "metric": "deployment_frequency",
+      "value": 0.2857142857142857,
+      "unit": "deployments_per_day",
+      "status": "collected",
+      "notes": "Found 2 revisions in deployment history"
+    },
+    "lead_time": {
+      "metric": "lead_time_for_changes",
+      "value": 120,
+      "unit": "minutes",
+      "status": "estimated",
+      "notes": "No git repository provided"
+    },
+    "mttr": {
+      "metric": "mean_time_to_recovery",
+      "value": 0,
+      "unit": "minutes",
+      "status": "estimated",
+      "notes": "Estimated from pod restart behavior"
+    },
+    "change_failure_rate": {
+      "metric": "change_failure_rate",
+      "value": 5.0,
+      "unit": "percent",
+      "status": "estimated",
+      "notes": "Based on recent cluster events"
+    }
+  }
+}

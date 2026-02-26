@@ -1,0 +1,279 @@
+{
+  "friction_score": 100,
+  "friction_level": "Severe",
+  "total_steps": 15,
+  "total_time_minutes": 218.0,
+  "critical_path_minutes": 150.0,
+  "steps": {
+    "Write Code": {
+      "type": "manual",
+      "time_minutes": 60.0,
+      "cognitive_load": 3,
+      "has_feedback": true,
+      "error_prone": false,
+      "dependencies": []
+    },
+    "Run Local Tests": {
+      "type": "semi_automated",
+      "time_minutes": 5.0,
+      "cognitive_load": 2,
+      "has_feedback": true,
+      "error_prone": false,
+      "dependencies": [
+        "Write Code"
+      ]
+    },
+    "Create Dockerfile": {
+      "type": "manual",
+      "time_minutes": 15.0,
+      "cognitive_load": 4,
+      "has_feedback": false,
+      "error_prone": true,
+      "dependencies": []
+    },
+    "Build Container Image": {
+      "type": "automated",
+      "time_minutes": 3.0,
+      "cognitive_load": 1,
+      "has_feedback": true,
+      "error_prone": false,
+      "dependencies": [
+        "Create Dockerfile"
+      ]
+    },
+    "Write Kubernetes Manifests": {
+      "type": "manual",
+      "time_minutes": 20.0,
+      "cognitive_load": 5,
+      "has_feedback": false,
+      "error_prone": true,
+      "dependencies": []
+    },
+    "Configure Networking": {
+      "type": "manual",
+      "time_minutes": 15.0,
+      "cognitive_load": 5,
+      "has_feedback": false,
+      "error_prone": true,
+      "dependencies": [
+        "Write Kubernetes Manifests"
+      ]
+    },
+    "Set Up Observability": {
+      "type": "semi_automated",
+      "time_minutes": 10.0,
+      "cognitive_load": 3,
+      "has_feedback": true,
+      "error_prone": false,
+      "dependencies": [
+        "Write Kubernetes Manifests"
+      ]
+    },
+    "Push to Git": {
+      "type": "automated",
+      "time_minutes": 2.0,
+      "cognitive_load": 1,
+      "has_feedback": true,
+      "error_prone": false,
+      "dependencies": [
+        "Run Local Tests"
+      ]
+    },
+    "CI Pipeline": {
+      "type": "automated",
+      "time_minutes": 8.0,
+      "cognitive_load": 1,
+      "has_feedback": true,
+      "error_prone": false,
+      "dependencies": [
+        "Push to Git",
+        "Build Container Image"
+      ]
+    },
+    "Security Scan": {
+      "type": "automated",
+      "time_minutes": 5.0,
+      "cognitive_load": 1,
+      "has_feedback": true,
+      "error_prone": false,
+      "dependencies": [
+        "CI Pipeline"
+      ]
+    },
+    "Deploy to Staging": {
+      "type": "semi_automated",
+      "time_minutes": 10.0,
+      "cognitive_load": 3,
+      "has_feedback": true,
+      "error_prone": false,
+      "dependencies": [
+        "CI Pipeline",
+        "Configure Networking",
+        "Set Up Observability"
+      ]
+    },
+    "Manual QA Testing": {
+      "type": "manual",
+      "time_minutes": 30.0,
+      "cognitive_load": 4,
+      "has_feedback": true,
+      "error_prone": true,
+      "dependencies": [
+        "Deploy to Staging"
+      ]
+    },
+    "Request Production Approval": {
+      "type": "manual",
+      "time_minutes": 15.0,
+      "cognitive_load": 2,
+      "has_feedback": false,
+      "error_prone": false,
+      "dependencies": [
+        "Manual QA Testing",
+        "Security Scan"
+      ]
+    },
+    "Deploy to Production": {
+      "type": "semi_automated",
+      "time_minutes": 10.0,
+      "cognitive_load": 3,
+      "has_feedback": true,
+      "error_prone": true,
+      "dependencies": [
+        "Request Production Approval"
+      ]
+    },
+    "Verify Production Health": {
+      "type": "semi_automated",
+      "time_minutes": 10.0,
+      "cognitive_load": 3,
+      "has_feedback": true,
+      "error_prone": false,
+      "dependencies": [
+        "Deploy to Production"
+      ]
+    }
+  },
+  "friction_points": [
+    {
+      "step": "Write Code",
+      "issue": "Manual execution",
+      "impact": "Could be automated",
+      "priority": "High"
+    },
+    {
+      "step": "Write Code",
+      "issue": "Long execution time",
+      "impact": "Blocks developer workflow",
+      "priority": "Medium"
+    },
+    {
+      "step": "Create Dockerfile",
+      "issue": "Manual execution",
+      "impact": "Could be automated",
+      "priority": "High"
+    },
+    {
+      "step": "Create Dockerfile",
+      "issue": "No feedback loop",
+      "impact": "Developer must wait for external confirmation",
+      "priority": "High"
+    },
+    {
+      "step": "Create Dockerfile",
+      "issue": "High cognitive load",
+      "impact": "Complex, error-prone step",
+      "priority": "Medium"
+    },
+    {
+      "step": "Create Dockerfile",
+      "issue": "Error-prone",
+      "impact": "Frequently fails, requires rework",
+      "priority": "High"
+    },
+    {
+      "step": "Write Kubernetes Manifests",
+      "issue": "Manual execution",
+      "impact": "Could be automated",
+      "priority": "High"
+    },
+    {
+      "step": "Write Kubernetes Manifests",
+      "issue": "No feedback loop",
+      "impact": "Developer must wait for external confirmation",
+      "priority": "High"
+    },
+    {
+      "step": "Write Kubernetes Manifests",
+      "issue": "High cognitive load",
+      "impact": "Complex, error-prone step",
+      "priority": "Medium"
+    },
+    {
+      "step": "Write Kubernetes Manifests",
+      "issue": "Error-prone",
+      "impact": "Frequently fails, requires rework",
+      "priority": "High"
+    },
+    {
+      "step": "Configure Networking",
+      "issue": "Manual execution",
+      "impact": "Could be automated",
+      "priority": "High"
+    },
+    {
+      "step": "Configure Networking",
+      "issue": "No feedback loop",
+      "impact": "Developer must wait for external confirmation",
+      "priority": "High"
+    },
+    {
+      "step": "Configure Networking",
+      "issue": "High cognitive load",
+      "impact": "Complex, error-prone step",
+      "priority": "Medium"
+    },
+    {
+      "step": "Configure Networking",
+      "issue": "Error-prone",
+      "impact": "Frequently fails, requires rework",
+      "priority": "High"
+    },
+    {
+      "step": "Manual QA Testing",
+      "issue": "Manual execution",
+      "impact": "Could be automated",
+      "priority": "High"
+    },
+    {
+      "step": "Manual QA Testing",
+      "issue": "High cognitive load",
+      "impact": "Complex, error-prone step",
+      "priority": "Medium"
+    },
+    {
+      "step": "Manual QA Testing",
+      "issue": "Error-prone",
+      "impact": "Frequently fails, requires rework",
+      "priority": "High"
+    },
+    {
+      "step": "Request Production Approval",
+      "issue": "Manual execution",
+      "impact": "Could be automated",
+      "priority": "High"
+    },
+    {
+      "step": "Request Production Approval",
+      "issue": "No feedback loop",
+      "impact": "Developer must wait for external confirmation",
+      "priority": "High"
+    },
+    {
+      "step": "Deploy to Production",
+      "issue": "Error-prone",
+      "impact": "Frequently fails, requires rework",
+      "priority": "High"
+    }
+  ]
+}
