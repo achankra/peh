@@ -84,25 +84,37 @@ bw_init() {
 #   - Otherwise returns the named custom field
 bw_get() {
     local item_name="$1"
-    local field_name="${2:-}"
+    local field_name="${2:-password}"
 
-    if [ -z "$BW_SESSION" ]; then
+    if [ -z "${BW_SESSION:-}" ]; then
         echo -e "${RED}Error: Vault not unlocked. Run bw_init first.${NC}" >&2
         return 1
     fi
 
-    if [ -z "$field_name" ] || [ "$field_name" = "password" ]; then
-        bw get password "$item_name" --session "$BW_SESSION" 2>/dev/null
-    elif [ "$field_name" = "notes" ]; then
+    if [ "$field_name" = "notes" ]; then
         bw get notes "$item_name" --session "$BW_SESSION" 2>/dev/null
+        return
+    fi
+
+    # Try the built-in shortcut first (works for Login items)
+    local value=""
+    if [ "$field_name" = "password" ]; then
+        value=$(bw get password "$item_name" --session "$BW_SESSION" 2>/dev/null || true)
     elif [ "$field_name" = "username" ]; then
-        bw get username "$item_name" --session "$BW_SESSION" 2>/dev/null
+        value=$(bw get username "$item_name" --session "$BW_SESSION" 2>/dev/null || true)
     elif [ "$field_name" = "uri" ]; then
-        bw get uri "$item_name" --session "$BW_SESSION" 2>/dev/null
-    else
-        # Custom field
-        bw get item "$item_name" --session "$BW_SESSION" 2>/dev/null \
-            | python3 -c "
+        value=$(bw get uri "$item_name" --session "$BW_SESSION" 2>/dev/null || true)
+    fi
+
+    # If shortcut returned a value, use it
+    if [ -n "$value" ]; then
+        echo "$value"
+        return
+    fi
+
+    # Fall back to custom field lookup (works for both Login and Secure Note items)
+    bw get item "$item_name" --session "$BW_SESSION" 2>/dev/null \
+        | python3 -c "
 import sys, json
 item = json.load(sys.stdin)
 for f in item.get('fields', []):
@@ -111,7 +123,6 @@ for f in item.get('fields', []):
         sys.exit(0)
 print('')
 " 2>/dev/null
-    fi
 }
 
 # Export a secret as an environment variable

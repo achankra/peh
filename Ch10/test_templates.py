@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
-"""Test suite for starter kit templates.
-
-Validates that templates:
-- Have valid Backstage YAML
-- Contain required files
-- Generate valid projects that build and pass linting
-"""
+"""Test suite for starter kit templates."""
 
 import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 import pytest
 import yaml
+import requests
 
-TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
 def get_template_versions():
@@ -39,17 +35,17 @@ def temp_dir():
 
 
 @pytest.mark.parametrize("template_name,version", get_template_versions())
-class TestTemplate:
-    """Tests for each template version."""
+class TestTemplateStructure:
+    """Structural tests for each template version."""
 
-    def test_backstage_yaml_valid(self, template_name, version):
+    def test_template_yaml_valid(self, template_name, version):
         """Validate Backstage template YAML."""
         template_path = TEMPLATES_DIR / template_name / version
-        backstage_file = template_path / "backstage" / "template.yaml"
+        template_file = template_path / "template.yaml"
 
-        assert backstage_file.exists(), "backstage/template.yaml missing"
+        assert template_file.exists(), "template.yaml missing"
 
-        with open(backstage_file) as f:
+        with open(template_file) as f:
             template = yaml.safe_load(f)
 
         assert template.get("apiVersion") == "scaffolder.backstage.io/v1beta3"
@@ -60,75 +56,55 @@ class TestTemplate:
 
     def test_required_files_exist(self, template_name, version):
         """Check required template files exist."""
-        template_path = TEMPLATES_DIR / template_name / version / "template"
+        template_path = TEMPLATES_DIR / template_name / version / "skeleton"
 
         required_files = [
-            "README.md.ejs",
-            "Dockerfile.ejs",
+            "README.md",
+            "Dockerfile",
         ]
 
         if "backend" in template_name:
             required_files.extend([
-                "package.json.ejs",
+                "package.json",
                 "tsconfig.json",
-                ".github/workflows/ci.yml.ejs"
+                ".github/workflows/ci.yml"
             ])
 
         for file_name in required_files:
             file_path = template_path / file_name
             assert file_path.exists(), f"Missing required file: {file_name}"
 
-    def test_generator_produces_valid_project(self, template_name, version, temp_dir):
-        """Generate a project and validate it."""
-        generator_path = TEMPLATES_DIR / template_name / version / "generator"
 
-        if not (generator_path / "index.js").exists():
-            pytest.skip("No Yeoman generator found")
-
-        # Run generator
-        result = subprocess.run(
-            [
-                "yo", str(generator_path),
-                "--name", "test-service",
-                "--team", "test-team",
-                "--database", "none",
-                "--no-install"
-            ],
-            cwd=temp_dir,
-            capture_output=True,
-            text=True
-        )
-
-        assert result.returncode == 0, f"Generator failed: {result.stderr}"
-
-        project_path = temp_dir / "test-service"
-        assert project_path.exists(), "Generated project not found"
-
-        # Check key files exist
-        assert (project_path / "package.json").exists()
-        assert (project_path / "Dockerfile").exists()
-        assert (project_path / "README.md").exists()
+@pytest.mark.parametrize("template_name,version", get_template_versions())
+class TestTemplateGeneration:
+    """Functional tests that generate and validate projects."""
 
     def test_generated_project_builds(self, template_name, version, temp_dir):
         """Verify generated project builds successfully."""
-        generator_path = TEMPLATES_DIR / template_name / version / "generator"
+        skeleton_path = TEMPLATES_DIR / template_name / version / "skeleton"
+        project_path = temp_dir / "test-project"
 
-        if not (generator_path / "index.js").exists():
-            pytest.skip("No Yeoman generator found")
+        # Copy skeleton (simulating generation without variable substitution)
+        shutil.copytree(skeleton_path, project_path)
 
-        # Generate project
-        subprocess.run(
-            [
-                "yo", str(generator_path),
-                "--name", "build-test",
-                "--team", "test-team",
-                "--database", "none"
-            ],
-            cwd=temp_dir,
-            capture_output=True
+        # Substitute variables manually for testing
+        self._substitute_variables(project_path, {
+            "serviceName": "test-project",
+            "team": "test-team",
+            "description": "Test project",
+            "port": "8080",
+            "templateVersion": "1.0.0",
+            "year": "2024"
+        })
+
+        # Install dependencies
+        result = subprocess.run(
+            ["npm", "install"],
+            cwd=project_path,
+            capture_output=True,
+            text=True
         )
-
-        project_path = temp_dir / "build-test"
+        assert result.returncode == 0, f"npm install failed: {result.stderr}"
 
         # Run build
         result = subprocess.run(
@@ -137,36 +113,104 @@ class TestTemplate:
             capture_output=True,
             text=True
         )
-
         assert result.returncode == 0, f"Build failed: {result.stderr}"
 
     def test_generated_project_passes_lint(self, template_name, version, temp_dir):
         """Verify generated project passes linting."""
-        generator_path = TEMPLATES_DIR / template_name / version / "generator"
-
-        if not (generator_path / "index.js").exists():
-            pytest.skip("No Yeoman generator found")
-
-        # Generate project
-        subprocess.run(
-            [
-                "yo", str(generator_path),
-                "--name", "lint-test",
-                "--team", "test-team",
-                "--database", "none"
-            ],
-            cwd=temp_dir,
-            capture_output=True
-        )
-
+        skeleton_path = TEMPLATES_DIR / template_name / version / "skeleton"
         project_path = temp_dir / "lint-test"
 
-        # Run lint
+        shutil.copytree(skeleton_path, project_path)
+        self._substitute_variables(project_path, {
+            "serviceName": "lint-test",
+            "team": "test-team",
+            "description": "Lint test",
+            "port": "8080",
+            "templateVersion": "1.0.0",
+            "year": "2024"
+        })
+
+        subprocess.run(["npm", "install"], cwd=project_path, capture_output=True)
         result = subprocess.run(
             ["npm", "run", "lint"],
             cwd=project_path,
             capture_output=True,
             text=True
         )
-
         assert result.returncode == 0, f"Lint failed: {result.stderr}"
+
+    def test_generated_project_tests_pass(self, template_name, version, temp_dir):
+        """Verify generated project's tests pass."""
+        skeleton_path = TEMPLATES_DIR / template_name / version / "skeleton"
+        project_path = temp_dir / "test-test"
+
+        shutil.copytree(skeleton_path, project_path)
+        self._substitute_variables(project_path, {
+            "serviceName": "test-test",
+            "team": "test-team",
+            "description": "Test test",
+            "port": "8080",
+            "templateVersion": "1.0.0",
+            "year": "2024"
+        })
+
+        subprocess.run(["npm", "install"], cwd=project_path, capture_output=True)
+        result = subprocess.run(
+            ["npm", "test"],
+            cwd=project_path,
+            capture_output=True,
+            text=True
+        )
+        assert result.returncode == 0, f"Tests failed: {result.stderr}"
+
+    def test_health_endpoint_responds(self, template_name, version, temp_dir):
+        """Verify the application's health endpoint actually responds."""
+        if "backend" not in template_name:
+            pytest.skip("Health check only applies to backend services")
+
+        skeleton_path = TEMPLATES_DIR / template_name / version / "skeleton"
+        project_path = temp_dir / "health-test"
+
+        shutil.copytree(skeleton_path, project_path)
+        self._substitute_variables(project_path, {
+            "serviceName": "health-test",
+            "team": "test-team",
+            "description": "Health test",
+            "port": "8080",
+            "templateVersion": "1.0.0",
+            "year": "2024"
+        })
+
+        subprocess.run(["npm", "install"], cwd=project_path, capture_output=True)
+        subprocess.run(["npm", "run", "build"], cwd=project_path, capture_output=True)
+
+        # Start the application
+        proc = subprocess.Popen(
+            ["npm", "start"],
+            cwd=project_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+
+        try:
+            # Wait for startup
+            time.sleep(5)
+
+            # Check health endpoint
+            response = requests.get("http://localhost:8080/health", timeout=5)
+            assert response.status_code == 200, f"Health check failed: {response.status_code}"
+        finally:
+            proc.terminate()
+            proc.wait()
+
+    def _substitute_variables(self, project_path: Path, values: dict):
+        """Replace template variables in all files."""
+        for file_path in project_path.rglob("*"):
+            if file_path.is_file():
+                try:
+                    content = file_path.read_text()
+                    for key, value in values.items():
+                        content = content.replace(f"${{{{ values.{key} }}}}", value)
+                    file_path.write_text(content)
+                except UnicodeDecodeError:
+                    pass  # Skip binary files

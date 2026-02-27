@@ -1,0 +1,155 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: backend-service-v1
+  title: Backend Service
+  description: Create a new Node.js backend service with platform integrations
+  tags:
+    - nodejs
+    - backend
+    - recommended
+  annotations:
+    backstage.io/managed-by-location: url:https://github.com/platform-org/starter-kits
+spec:
+  owner: platform-team
+  type: service
+  parameters:
+    - title: Service Information
+      required:
+        - serviceName
+        - team
+      properties:
+        serviceName:
+          title: Service Name
+          type: string
+          description: Unique name for the service (lowercase, alphanumeric, hyphens)
+          pattern: "^[a-z][a-z0-9-]*$"
+          ui:autofocus: true
+        team:
+          title: Team
+          type: string
+          description: The team that owns this service
+          ui:field: OwnerPicker
+          ui:options:
+            allowedKinds:
+              - Group
+        description:
+          title: Description
+          type: string
+          description: A brief description of the service
+    - title: Configuration
+      properties:
+        database:
+          title: Database
+          type: string
+          description: Database requirement for the service
+          default: none
+          enum:
+            - none
+            - postgresql
+            - mongodb
+          enumNames:
+            - None
+            - PostgreSQL
+            - MongoDB
+        port:
+          title: Port
+          type: number
+          description: Service port
+          default: 8080
+    - title: Repository
+      required:
+        - repoUrl
+      properties:
+        repoUrl:
+          title: Repository Location
+          type: string
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+  steps:
+    - id: fetch
+      name: Fetch Template
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          serviceName: ${{ parameters.serviceName }}
+          team: ${{ parameters.team }}
+          description: ${{ parameters.description }}
+          database: ${{ parameters.database }}
+          port: ${{ parameters.port }}
+          year: ${{ '' | now | date('YYYY') }}
+          templateVersion: "1.0.0"
+
+    - id: fetch-database
+      name: Add Database Configuration
+      if: ${{ parameters.database !== 'none' }}
+      action: fetch:template
+      input:
+        url: ./skeleton/database/${{ parameters.database }}
+        targetPath: src/database
+        values:
+          serviceName: ${{ parameters.serviceName }}
+          database: ${{ parameters.database }}
+
+    - id: fetch-infra-claim
+      name: Add Infrastructure Claim
+      if: ${{ parameters.database !== 'none' }}
+      action: fetch:template
+      input:
+        url: ./skeleton/infrastructure
+        targetPath: infrastructure
+        values:
+          serviceName: ${{ parameters.serviceName }}
+          team: ${{ parameters.team }}
+          database: ${{ parameters.database }}
+
+    - id: publish
+      name: Publish to GitHub
+      action: publish:github
+      input:
+        allowedHosts: ["github.com"]
+        repoUrl: ${{ parameters.repoUrl }}
+        description: ${{ parameters.description }}
+        defaultBranch: main
+        protectDefaultBranch: true
+        requireCodeOwnerReviews: true
+
+    - id: create-namespace
+      name: Create Kubernetes Namespace
+      action: http:backstage:request
+      input:
+        method: POST
+        path: /api/onboarding/v1/namespaces
+        headers:
+          Content-Type: application/json
+        body:
+          name: ${{ parameters.serviceName }}
+          team: ${{ parameters.team }}
+          labels:
+            platform.io/created-by: backstage-scaffolder
+
+    - id: register
+      name: Register in Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps.publish.output.repoContentsUrl }}
+        catalogInfoPath: /catalog-info.yaml
+
+  output:
+    links:
+      - title: Repository
+        url: ${{ steps.publish.output.remoteUrl }}
+      - title: Open in Catalog
+        icon: catalog
+        entityRef: ${{ steps.register.output.entityRef }}
+    text:
+      - title: Next Steps
+        content: |
+          Your service has been created. Clone the repository and start development:
+
+          git clone ${{ steps.publish.output.remoteUrl }}
+          cd ${{ parameters.serviceName }}
+          docker compose up

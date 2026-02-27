@@ -2,7 +2,7 @@
 # Demonstrates zero-downtime deployment with quick rollback capability
 #
 # The blue-green strategy maintains two identical environments:
-# - "Blue" (current production) receives all traffic
+# - "Blue" (current version) receives all traffic
 # - "Green" (new version) is deployed and validated
 # - After validation, traffic switches to green
 # - Blue remains available for quick rollback
@@ -18,7 +18,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: production
+  name: staging
   labels:
     app: myapp
 
@@ -28,7 +28,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: myapp-blue
-  namespace: production
+  namespace: staging
   labels:
     app: myapp
     color: blue
@@ -131,7 +131,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: myapp-green
-  namespace: production
+  namespace: staging
   labels:
     app: myapp
     color: green
@@ -229,7 +229,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: myapp
-  namespace: production
+  namespace: staging
   labels:
     app: myapp
   annotations:
@@ -251,7 +251,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: myapp
-  namespace: production
+  namespace: staging
   labels:
     app: myapp
 spec:
@@ -278,7 +278,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: myapp-blue-hpa
-  namespace: production
+  namespace: staging
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -322,7 +322,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: myapp-green-hpa
-  namespace: production
+  namespace: staging
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -350,12 +350,12 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: blue-green-ops
-  namespace: production
+  namespace: staging
 data:
   # Scale green to match blue and validate
   scale-green.sh: |
     #!/bin/bash
-    NAMESPACE="production"
+    NAMESPACE="staging"
     BLUE_REPLICAS=$(kubectl get deployment myapp-blue -n $NAMESPACE -o jsonpath='{.spec.replicas}')
     kubectl scale deployment myapp-green -n $NAMESPACE --replicas=$BLUE_REPLICAS
     echo "Scaled green deployment to $BLUE_REPLICAS replicas"
@@ -364,7 +364,7 @@ data:
   # Test green deployment (can be done while blue handles traffic)
   test-green.sh: |
     #!/bin/bash
-    NAMESPACE="production"
+    NAMESPACE="staging"
     echo "Testing green deployment..."
     kubectl run green-test --image=curlimages/curl -n $NAMESPACE \
       --rm -it --restart=Never -- \
@@ -374,7 +374,7 @@ data:
   # Switch traffic from blue to green
   switch-to-green.sh: |
     #!/bin/bash
-    NAMESPACE="production"
+    NAMESPACE="staging"
     echo "Switching traffic to green deployment..."
     kubectl patch service myapp -n $NAMESPACE -p '{"spec":{"selector":{"color":"green"}}}'
     echo "Traffic now routed to green deployment"
@@ -382,7 +382,7 @@ data:
   # Rollback: switch traffic back to blue
   rollback-to-blue.sh: |
     #!/bin/bash
-    NAMESPACE="production"
+    NAMESPACE="staging"
     echo "Rolling back to blue deployment..."
     kubectl patch service myapp -n $NAMESPACE -p '{"spec":{"selector":{"color":"blue"}}}'
     echo "Traffic switched back to blue deployment"
@@ -391,7 +391,7 @@ data:
   deploy-full.sh: |
     #!/bin/bash
     set -e
-    NAMESPACE="production"
+    NAMESPACE="staging"
     
     echo "=== Blue-Green Deployment Procedure ==="
     echo "1. Scaling green to production replicas..."

@@ -420,6 +420,8 @@ The workflow implements a robust six-stage release process:
 
 **CircleCI Infrastructure Workflow (`.circleci/config.yml`):**
 
+> **Why CircleCI here and GitHub Actions later?** This chapter uses CircleCI for infrastructure deployment pipelines (Pulumi preview/approve/apply). Chapter 8 switches to GitHub Actions for application CI/CD pipelines. This is intentional — a platform team should be CI-tool-agnostic. The patterns demonstrated (reusable workflows, approval gates, progressive delivery) translate across any CI/CD system. Think of CircleCI here as the *infrastructure track* and GitHub Actions in Chapter 8 as the *application delivery track*. Many organizations run both in production.
+
 Demonstrates infrastructure-as-code deployment with Pulumi:
 - **Preview Stage**: Shows infrastructure changes without applying (runs on all pushes to main)
 - **Approval Gate**: Requires manual approval (triggered by version tags)
@@ -634,7 +636,7 @@ After working through this chapter's code:
 2. **Run the maturity assessment** to establish a baseline
 3. **Validate design principles** in your actual platform configuration
 4. **Set up Git hooks** for your development team
-5. **Adapt the release workflows** to match your CI/CD infrastructure (GitHub Actions, CircleCI, GitLab, etc.)
+5. **Adapt the release workflows** to match your CI/CD infrastructure — this book demonstrates both CircleCI (Chapter 1, infrastructure pipelines) and GitHub Actions (Chapter 8, application delivery) to show the patterns are CI-tool-agnostic
 6. **Establish team topologies** with clear responsibilities and interaction modes
 7. **Document your platform's golden paths** using the configuration as a template
 8. **Measure progress** by running the maturity assessment quarterly and tracking improvements

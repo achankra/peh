@@ -2,6 +2,10 @@
 # Composition that implements the PostgreSQL XRD interface
 # Deploys PostgreSQL as a StatefulSet inside the Kind cluster using
 # the Crossplane Kubernetes provider — no cloud dependencies required.
+#
+# This uses the Crossplane v2 Composition pipeline mode with the
+# function-patch-and-transform function, which replaces the legacy
+# inline resources/patchSets syntax.
 
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
@@ -15,176 +19,177 @@ spec:
     apiVersion: database.platform.io/v1alpha1
     kind: PostgreSQLInstance
   writeConnectionSecretsToNamespace: crossplane-system
-  patchSets:
-    - name: common-labels
-      patches:
-        - type: FromCompositeFieldPath
-          fromFieldPath: metadata.labels
-          toFieldPath: metadata.labels
-          policy:
-            mergeOptions:
-              keepMapValues: true
-    - name: tier-settings
-      patches:
-        - type: FromCompositeFieldPath
-          fromFieldPath: spec.parameters.tier
-          toFieldPath: spec.forProvider.manifest.spec.resources.requests.memory
-          transforms:
-            - type: map
-              map:
-                development: "256Mi"
-                staging: "512Mi"
-                production: "1Gi"
-  resources:
-    # Namespace for the database
-    - name: db-namespace
-      base:
-        apiVersion: kubernetes.crossplane.io/v1alpha2
-        kind: Object
-        spec:
-          forProvider:
-            manifest:
-              apiVersion: v1
-              kind: Namespace
-              metadata:
-                name: databases
-      patches:
-        - type: PatchSet
-          patchSetName: common-labels
-
-    # PersistentVolumeClaim for PostgreSQL data
-    - name: db-pvc
-      base:
-        apiVersion: kubernetes.crossplane.io/v1alpha2
-        kind: Object
-        spec:
-          forProvider:
-            manifest:
-              apiVersion: v1
-              kind: PersistentVolumeClaim
-              metadata:
-                name: postgresql-data
-                namespace: databases
+  mode: Pipeline
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: common-labels
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.labels
+                toFieldPath: metadata.labels
+          - name: tier-settings
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tier
+                toFieldPath: spec.forProvider.manifest.spec.resources.requests.memory
+                transforms:
+                  - type: map
+                    map:
+                      development: "256Mi"
+                      staging: "512Mi"
+                      production: "1Gi"
+        resources:
+          # Namespace for the database
+          - name: db-namespace
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
               spec:
-                accessModes:
-                  - ReadWriteOnce
-                resources:
-                  requests:
-                    storage: 1Gi
-      patches:
-        - type: FromCompositeFieldPath
-          fromFieldPath: spec.parameters.storageGB
-          toFieldPath: spec.forProvider.manifest.spec.resources.requests.storage
-          transforms:
-            - type: string
-              string:
-                fmt: "%dGi"
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: Namespace
+                    metadata:
+                      name: databases
+            patches:
+              - type: PatchSet
+                patchSetName: common-labels
 
-    # PostgreSQL Deployment
-    - name: db-deployment
-      base:
-        apiVersion: kubernetes.crossplane.io/v1alpha2
-        kind: Object
-        spec:
-          forProvider:
-            manifest:
-              apiVersion: apps/v1
-              kind: Deployment
-              metadata:
-                name: postgresql
-                namespace: databases
-                labels:
-                  app: postgresql
-                  platform.io/managed-by: crossplane
+          # PersistentVolumeClaim for PostgreSQL data
+          - name: db-pvc
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
               spec:
-                replicas: 1
-                selector:
-                  matchLabels:
-                    app: postgresql
-                template:
-                  metadata:
-                    labels:
-                      app: postgresql
-                  spec:
-                    containers:
-                      - name: postgresql
-                        image: postgres:15-alpine
-                        ports:
-                          - containerPort: 5432
-                        env:
-                          - name: POSTGRES_DB
-                            value: platformdb
-                          - name: POSTGRES_USER
-                            value: platform
-                          - name: POSTGRES_PASSWORD
-                            valueFrom:
-                              secretKeyRef:
-                                name: db-credentials
-                                key: password
-                          - name: PGDATA
-                            value: /var/lib/postgresql/data/pgdata
-                        resources:
-                          requests:
-                            cpu: 100m
-                            memory: 256Mi
-                          limits:
-                            cpu: 500m
-                            memory: 512Mi
-                        volumeMounts:
-                          - name: data
-                            mountPath: /var/lib/postgresql/data
-                        readinessProbe:
-                          exec:
-                            command:
-                              - pg_isready
-                              - -U
-                              - platform
-                          initialDelaySeconds: 5
-                          periodSeconds: 10
-                    volumes:
-                      - name: data
-                        persistentVolumeClaim:
-                          claimName: postgresql-data
-      patches:
-        - type: PatchSet
-          patchSetName: common-labels
-        - type: PatchSet
-          patchSetName: tier-settings
-        - type: FromCompositeFieldPath
-          fromFieldPath: spec.parameters.version
-          toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].image
-          transforms:
-            - type: string
-              string:
-                fmt: "postgres:%s-alpine"
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: PersistentVolumeClaim
+                    metadata:
+                      name: postgresql-data
+                      namespace: databases
+                    spec:
+                      accessModes:
+                        - ReadWriteOnce
+                      resources:
+                        requests:
+                          storage: 20Gi
 
-    # Service to expose PostgreSQL
-    - name: db-service
-      base:
-        apiVersion: kubernetes.crossplane.io/v1alpha2
-        kind: Object
-        spec:
-          forProvider:
-            manifest:
-              apiVersion: v1
-              kind: Service
-              metadata:
-                name: postgresql
-                namespace: databases
-                labels:
-                  app: postgresql
+          # PostgreSQL Deployment
+          - name: db-deployment
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
               spec:
-                type: ClusterIP
-                ports:
-                  - port: 5432
-                    targetPort: 5432
-                    protocol: TCP
-                selector:
-                  app: postgresql
-      connectionDetails:
-        - name: endpoint
-          value: postgresql.databases.svc.cluster.local
-        - name: port
-          value: "5432"
-        - name: username
-          value: platform
+                forProvider:
+                  manifest:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: postgresql
+                      namespace: databases
+                      labels:
+                        app: postgresql
+                        platform.io/managed-by: crossplane
+                    spec:
+                      replicas: 1
+                      selector:
+                        matchLabels:
+                          app: postgresql
+                      template:
+                        metadata:
+                          labels:
+                            app: postgresql
+                        spec:
+                          containers:
+                            - name: postgresql
+                              image: postgres:15-alpine
+                              ports:
+                                - containerPort: 5432
+                              env:
+                                - name: POSTGRES_DB
+                                  value: platformdb
+                                - name: POSTGRES_USER
+                                  value: platform
+                                - name: POSTGRES_PASSWORD
+                                  valueFrom:
+                                    secretKeyRef:
+                                      name: db-credentials
+                                      key: password
+                                - name: PGDATA
+                                  value: /var/lib/postgresql/data/pgdata
+                              resources:
+                                requests:
+                                  cpu: 100m
+                                  memory: 256Mi
+                                limits:
+                                  cpu: 500m
+                                  memory: 512Mi
+                              volumeMounts:
+                                - name: data
+                                  mountPath: /var/lib/postgresql/data
+                              readinessProbe:
+                                exec:
+                                  command:
+                                    - pg_isready
+                                    - -U
+                                    - platform
+                                initialDelaySeconds: 5
+                                periodSeconds: 10
+                          volumes:
+                            - name: data
+                              persistentVolumeClaim:
+                                claimName: postgresql-data
+            patches:
+              - type: PatchSet
+                patchSetName: common-labels
+              - type: PatchSet
+                patchSetName: tier-settings
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.version
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].image
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "postgres:%s-alpine"
+
+          # Service to expose PostgreSQL
+          - name: db-service
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: Service
+                    metadata:
+                      name: postgresql
+                      namespace: databases
+                      labels:
+                        app: postgresql
+                    spec:
+                      type: ClusterIP
+                      ports:
+                        - port: 5432
+                          targetPort: 5432
+                          protocol: TCP
+                      selector:
+                        app: postgresql
+            connectionDetails:
+              - name: endpoint
+                type: FromValue
+                value: postgresql.databases.svc.cluster.local
+              - name: port
+                type: FromValue
+                value: "5432"
+              - name: username
+                type: FromValue
+                value: platform

@@ -20,17 +20,36 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source the shared Bitwarden helper
-if [ -f "$SCRIPT_DIR/../../Ch01/scripts/bw-helper.sh" ]; then
-    source "$SCRIPT_DIR/../../Ch01/scripts/bw-helper.sh"
+# Try runtime layout first (peh repo: ChXX/scripts/), then Manuscript layout (ChX/code/scripts/)
+BW_HELPER=""
+for candidate in \
+    "$SCRIPT_DIR/../Ch01/scripts/bw-helper.sh" \
+    "$SCRIPT_DIR/../../Ch1/code/scripts/bw-helper.sh"; do
+    if [ -f "$candidate" ]; then
+        BW_HELPER="$candidate"
+        break
+    fi
+done
+
+if [ -n "$BW_HELPER" ]; then
+    source "$BW_HELPER"
 else
-    echo "Error: bw-helper.sh not found. Copy it from Ch01/scripts/"
-    exit 1
+    echo "Error: bw-helper.sh not found."
+    echo "Looked in:"
+    echo "  $SCRIPT_DIR/../Ch01/scripts/bw-helper.sh"
+    echo "  $SCRIPT_DIR/../../Ch1/code/scripts/bw-helper.sh"
+    return 1 2>/dev/null || exit 1
 fi
 
 echo "Loading Chapter 14 secrets from Bitwarden..."
 echo ""
 
-bw_init
+# Skip bw_init if the vault is already unlocked (BW_SESSION set externally)
+if [ -n "${BW_SESSION:-}" ]; then
+    echo "Bitwarden session already active, skipping unlock."
+else
+    bw_init
+fi
 
 # OpenAI API key for RAG pipeline and chatbot
 bw_export "OPENAI_API_KEY"  "peh-openai"  "password"

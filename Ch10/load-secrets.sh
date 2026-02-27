@@ -1,48 +1,28 @@
 #!/bin/bash
 # =============================================================================
-# Chapter 10: Load Secrets from Bitwarden
+# Chapter 10: Load Secrets
 # =============================================================================
-# Retrieves Backstage API credentials from the Bitwarden vault for
-# publishing starter kit templates to the Backstage catalog.
+# Sets environment variables needed for template publishing.
 #
 # Usage:
 #   source load-secrets.sh    # exports env vars into current shell
 #
-# Vault items expected (create these in Bitwarden):
-#   "peh-backstage"      -> uri: http://localhost:7007
-#   "peh-backstage"      -> password: <backstage-api-token>
-#
-# After running, the following environment variables are set:
-#   BACKSTAGE_URL        - Backstage instance URL
-#   BACKSTAGE_TOKEN      - Backstage API authentication token
+# Our Backstage instance uses guest auth (dangerouslyDisableDefaultAuthPolicy)
+# from Ch6, so no API token is needed. In production Backstage with real auth,
+# you'd add BACKSTAGE_TOKEN here.
 # =============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export BACKSTAGE_URL="${BACKSTAGE_URL:-http://localhost:7007}"
+echo "BACKSTAGE_URL=$BACKSTAGE_URL"
 
-# Source the shared Bitwarden helper
-if [ -f "$SCRIPT_DIR/../../Ch01/scripts/bw-helper.sh" ]; then
-    source "$SCRIPT_DIR/../../Ch01/scripts/bw-helper.sh"
+# Optional: If your Backstage has auth enabled, set the token via Bitwarden
+if [ -n "${BACKSTAGE_TOKEN:-}" ]; then
+    echo "BACKSTAGE_TOKEN is set (will use Bearer auth)"
 else
-    echo "Error: bw-helper.sh not found. Copy it from Ch01/scripts/"
-    exit 1
-fi
-
-echo "Loading Chapter 10 secrets from Bitwarden..."
-echo ""
-
-bw_init
-
-# Backstage credentials for template publishing
-bw_export "BACKSTAGE_URL"   "peh-backstage" "uri"
-bw_export "BACKSTAGE_TOKEN" "peh-backstage" "password"
-
-# Default URL if not stored
-if [ -z "${BACKSTAGE_URL:-}" ]; then
-    export BACKSTAGE_URL="http://localhost:7007"
-    echo "  ℹ BACKSTAGE_URL defaulting to http://localhost:7007"
+    echo "BACKSTAGE_TOKEN not set (using guest auth — no token needed for local Backstage)"
 fi
 
 echo ""
-echo "Chapter 10 secrets loaded. You can now run:"
+echo "Chapter 10 environment ready. You can now run:"
 echo "  python3 publish.py"
-echo "  python3 validate-workflow.py"
+echo "  pytest test_templates.py -v -k Structure"

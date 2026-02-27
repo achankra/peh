@@ -78,8 +78,8 @@ This section maps each file in the repository to specific chapter sections and l
 - Dry-run capability for validation before generation
 **Usage**:
 ```bash
-python pipeline-composer.py --config pipeline-config.yaml --output .github/workflows/main.yaml
-python pipeline-composer.py --config pipeline-config.yaml --dry-run  # Preview output
+python3 pipeline-composer.py --config pipeline-config.yaml --output .github/workflows/main.yaml
+python3 pipeline-composer.py --config pipeline-config.yaml --dry-run  # Preview output
 ```
 **Composable Elements**:
 1. Build job (calls build-and-test.yaml)
@@ -217,8 +217,8 @@ python pipeline-composer.py --config pipeline-config.yaml --dry-run  # Preview o
 4. Log results for incident tracking
 **Usage**:
 ```bash
-python rollback-controller.py --deployment myapp --namespace production
-python rollback-controller.py --demo  # Simulation mode showing health degradation and recovery
+python3 rollback-controller.py --deployment myapp --namespace production
+python3 rollback-controller.py --demo  # Simulation mode showing health degradation and recovery
 ```
 **Integration Points**:
 - Can be run as Kubernetes job after deployment
@@ -252,7 +252,7 @@ export GITHUB_TOKEN="ghp_..."
 export GITHUB_OWNER="myorg"
 export GITHUB_REPO="myrepo"
 export OUTPUT_FILE="/tmp/metrics.json"
-python scripts/ci_metrics.py
+python3 scripts/ci_metrics.py
 ```
 **Configuration via Environment Variables**:
 - `GITHUB_TOKEN`: GitHub API authentication
@@ -286,8 +286,8 @@ python scripts/ci_metrics.py
 
 **Running Tests**:
 ```bash
-python -m pytest test-pipelines.py -v
-python test-pipelines.py  # Direct execution with unittest
+python3 -m pytest test-pipelines.py -v
+python3 test-pipelines.py  # Direct execution with unittest
 ```
 
 **Expected Output**:
@@ -304,6 +304,10 @@ The following files exist in the repository but lack specific chapter mapping do
 
 **Recommendation**: Ensure .gitignore includes `__pycache__/` to prevent cache files from being committed.
 
+## Why GitHub Actions (not CircleCI)?
+
+In Chapter 1 we used CircleCI for infrastructure deployment pipelines with Pulumi. That was deliberate — a good platform team is CI-tool-agnostic. The underlying patterns (reusable workflows, progressive delivery, automated rollback) work across any CI/CD system. We switch to GitHub Actions here because: (1) it has the richest ecosystem for demonstrating reusable workflow composition via `workflow_call`, (2) GitHub Actions is included free with every GitHub repo — no extra vendor signup, and (3) these composable patterns translate directly to GitLab CI includes, Jenkins shared libraries, or CircleCI orbs. Think of Chapter 1's CircleCI pipeline as the *infrastructure track* and Chapter 8's GitHub Actions as the *application delivery track*. In practice, many organizations run both.
+
 ## Prerequisites
 
 ### Software Requirements
@@ -311,15 +315,55 @@ The following files exist in the repository but lack specific chapter mapping do
 - **Python**: 3.8+ (for pipeline-composer.py, rollback-controller.py, test-pipelines.py, ci_metrics.py)
 - **kubectl**: Latest version (for deployment and health monitoring)
 - **Docker/Docker Buildx**: Latest (for container builds in GitHub Actions)
-- **Kubernetes**: 1.24+ (for manifest deployment)
-- **Istio**: 1.10+ (only for canary deployments with traffic splitting)
+- **Kubernetes**: 1.24+ (Kind cluster from Chapter 2)
+- **Istio**: 1.10+ (only for canary deployments with traffic splitting — see install instructions below)
 - **Prometheus**: 2.30+ (for metrics collection and canary validation alerts)
 - **prometheus-operator**: Latest (for ServiceMonitor and PrometheusRule resources)
+
+### Installing Istio
+
+Istio is required for the canary deployment steps (Steps 4–5). Install it before running those steps:
+
+```bash
+# Option A: Homebrew (recommended on macOS)
+brew install istioctl
+
+# Option B: Direct download
+curl -L https://istio.io/downloadIstio | sh -
+export PATH="$PWD/istio-*/bin:$PATH"
+```
+
+Then install the demo profile into your Kind cluster:
+
+```bash
+istioctl install --set profile=demo -y
+
+# Verify Istio is running:
+kubectl get pods -n istio-system
+# Expected: istiod, istio-ingressgateway, istio-egressgateway all Running
+```
 
 ### Python Dependencies
 
 ```bash
-pip install pyyaml requests pytest
+pip install pyyaml requests pytest --break-system-packages
+```
+
+### Environment Setup
+
+Load secrets from Bitwarden (recommended):
+
+```bash
+export BW_SESSION=$(bw unlock --raw)
+source load-secrets.sh
+```
+
+Or export manually:
+
+```bash
+export GITHUB_TOKEN=ghp_YourActualTokenHere
+export GITHUB_OWNER=platformetrics
+export GITHUB_REPO=peh-companion-code
 ```
 
 ### GitHub Environment
@@ -399,10 +443,10 @@ Use the pipeline-composer to generate your CI/CD workflow from configuration:
 
 ```bash
 # Dry-run to preview the generated workflow
-python pipeline-composer.py --config pipeline-config.yaml --dry-run
+python3 pipeline-composer.py --config pipeline-config.yaml --dry-run
 
 # Generate the actual workflow
-python pipeline-composer.py --config pipeline-config.yaml \
+python3 pipeline-composer.py --config pipeline-config.yaml \
   --output .github/workflows/main.yaml
 ```
 
@@ -424,7 +468,7 @@ Set up staging environment with blue-green deployment:
 
 ```bash
 # Apply blue-green manifests to staging cluster
-kubectl apply -f blue-green-deployment.yaml --namespace staging
+kubectl apply -f blue-green-deployment.yaml
 
 # Verify deployments are running
 kubectl get deployments -n staging
@@ -522,7 +566,7 @@ Set up automated health monitoring and rollback:
 
 ```bash
 # Demo mode to see how rollback controller works
-python rollback-controller.py --demo
+python3 rollback-controller.py --demo
 
 # Output shows simulated health degradation and rollback:
 # --- Demo: Rollback Controller Simulation ---
@@ -532,7 +576,7 @@ python rollback-controller.py --demo
 # Check #4: 3/3 ready - Rollback complete - Healthy
 
 # Real deployment monitoring
-python rollback-controller.py \
+python3 rollback-controller.py \
   --deployment myapp \
   --namespace production
 ```
@@ -545,7 +589,7 @@ Add to your deployment workflow:
 - name: Monitor and Rollback
   if: success()
   run: |
-    python rollback-controller.py \
+    python3 rollback-controller.py \
       --deployment myapp \
       --namespace ${{ inputs.environment }} &
     ROLLBACK_PID=$!
@@ -570,7 +614,7 @@ export GITHUB_REPO="myrepo"
 export OUTPUT_FILE="/tmp/ci-metrics.json"
 
 # Run metrics collector
-python scripts/ci_metrics.py
+python3 scripts/ci_metrics.py
 
 # Output shows:
 # Collecting metrics for workflow: backend-pipeline.yml
@@ -607,7 +651,7 @@ Validate your implementation:
 
 ```bash
 # Run full test suite
-python -m pytest test-pipelines.py -v
+python3 -m pytest test-pipelines.py -v
 
 # Expected output:
 # test_build_and_test_workflow_exists PASSED
@@ -621,7 +665,7 @@ python -m pytest test-pipelines.py -v
 # test_pipeline_composer_valid PASSED
 
 # Or run with unittest directly
-python test-pipelines.py
+python3 test-pipelines.py
 ```
 
 **Test Results**:
@@ -811,16 +855,16 @@ Run the comprehensive test suite to validate implementation:
 
 ```bash
 # Unit tests for all components
-python -m pytest test-pipelines.py -v --tb=short
+python3 -m pytest test-pipelines.py -v --tb=short
 
 # Demo rollback controller simulation
-python rollback-controller.py --demo
+python3 rollback-controller.py --demo
 
 # Dry-run pipeline composition
-python pipeline-composer.py --config pipeline-config.yaml --dry-run
+python3 pipeline-composer.py --config pipeline-config.yaml --dry-run
 
 # Validate metrics collection (requires GITHUB_TOKEN)
-GITHUB_TOKEN="..." python scripts/ci_metrics.py
+GITHUB_TOKEN="..." python3 scripts/ci_metrics.py
 ```
 
 ## Troubleshooting
@@ -831,13 +875,13 @@ GITHUB_TOKEN="..." python scripts/ci_metrics.py
 ```bash
 # Solution: Ensure YAML config exists with correct path
 ls -la pipeline-config.yaml
-python pipeline-composer.py --config ./pipeline-config.yaml
+python3 pipeline-composer.py --config ./pipeline-config.yaml
 ```
 
 **Problem**: Generated workflow missing jobs
 ```bash
 # Solution: Check config structure with dry-run first
-python pipeline-composer.py --config pipeline-config.yaml --dry-run | head -20
+python3 pipeline-composer.py --config pipeline-config.yaml --dry-run | head -20
 ```
 
 ### Deployment Strategy Issues
@@ -867,7 +911,7 @@ kubectl port-forward -n monitoring prometheus-0 9090:9090
 # Solution: Use GitHub token with higher rate limits
 # Or reduce frequency of collection
 export GITHUB_TOKEN="ghp_token_with_full_access"
-python scripts/ci_metrics.py
+python3 scripts/ci_metrics.py
 ```
 
 ## Further Reading

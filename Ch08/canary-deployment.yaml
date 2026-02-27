@@ -225,7 +225,6 @@ spec:
       consecutive5xxErrors: 5
       interval: 30s
       baseEjectionTime: 30s
-      minRequestVolume: 5
       splitExternalLocalOriginErrors: true
   subsets:
   - name: stable

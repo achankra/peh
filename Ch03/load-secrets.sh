@@ -22,13 +22,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 _USE_BW=false
 
-# Try to load Bitwarden helper if available
-if [ -f "$SCRIPT_DIR/scripts/bw-helper.sh" ]; then
-    source "$SCRIPT_DIR/scripts/bw-helper.sh"
+# Source the shared Bitwarden helper
+# Try runtime layout first (peh repo: ChXX/scripts/), then Manuscript layout (ChX/code/scripts/)
+BW_HELPER=""
+for candidate in \
+    "$SCRIPT_DIR/../Ch01/scripts/bw-helper.sh" \
+    "$SCRIPT_DIR/../../Ch1/code/scripts/bw-helper.sh"; do
+    if [ -f "$candidate" ]; then
+        BW_HELPER="$candidate"
+        break
+    fi
+done
+
+if [ -n "$BW_HELPER" ]; then
+    source "$BW_HELPER"
     _USE_BW=true
-elif [ -f "$SCRIPT_DIR/../Ch01/scripts/bw-helper.sh" ]; then
-    source "$SCRIPT_DIR/../Ch01/scripts/bw-helper.sh"
-    _USE_BW=true
+else
+    echo "Error: bw-helper.sh not found."
+    echo "Looked in:"
+    echo "  $SCRIPT_DIR/../Ch01/scripts/bw-helper.sh"
+    echo "  $SCRIPT_DIR/../../Ch1/code/scripts/bw-helper.sh"
+    return 1 2>/dev/null || exit 1
 fi
 
 if [ "$_USE_BW" = true ] && command -v bw &>/dev/null; then

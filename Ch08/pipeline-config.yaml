@@ -1,0 +1,24 @@
+# Pipeline Composer Configuration
+# ================================
+# This file describes your application's CI/CD needs.
+# The pipeline-composer.py reads this and generates a complete
+# GitHub Actions workflow using reusable workflow components.
+#
+# Usage:
+#   python3 pipeline-composer.py --config pipeline-config.yaml --dry-run
+#   python3 pipeline-composer.py --config pipeline-config.yaml --output .github/workflows/main.yaml
+
+name: myapp
+language: python
+language-version: '3.10'
+image-registry: ghcr.io/platformetrics
+
+stages:
+  - name: build-and-test
+    tasks: [build-and-test, security-scan]
+  - name: deploy-staging
+    deploy-strategy: blue-green
+    environment: staging
+  - name: deploy-production
+    deploy-strategy: canary
+    environment: production

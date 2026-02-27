@@ -1,72 +1,176 @@
 #!/bin/bash
-# Upload secrets to Bitwarden vault using CLI
-# This script automates the process of securely storing infrastructure secrets
-# in Bitwarden for use by CI/CD pipelines and deployment tools.
+# =============================================================================
+# Upload All Book Secrets to Bitwarden Vault
+# =============================================================================
+# Creates all the Bitwarden vault items needed across the book's chapters.
+# Run this ONCE during Chapter 1 setup. Every subsequent chapter's
+# load-secrets.sh will pull from these items automatically.
+#
+# Usage:
+#   export BW_SESSION=$(bw unlock --raw)   # unlock first
+#   bash scripts/upload-secrets.sh          # then run this
+#
+# What gets created:
+#   peh-github     -> GitHub PAT (used in Ch6, Ch7, Ch8)
+#   peh-keycloak   -> Keycloak admin creds (used in Ch3)
+#   peh-db         -> PostgreSQL password (used in Ch9)
+#   peh-backstage  -> Backstage API token (used in Ch10)
+#   peh-openai     -> OpenAI API key (used in Ch14, optional)
+# =============================================================================
 
 set -euo pipefail
 
-# ── Load environment variables from .env file ───────────────────────
-# Expected variables: BW_CLIENTID, BW_CLIENTSECRET, BW_PASSWORD
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="$SCRIPT_DIR/../.env"
+# ── Colors ───────────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-if [ -f "$ENV_FILE" ]; then
-    set -a          # auto-export every variable that gets set
-    source "$ENV_FILE"
-    set +a
-elif [ -f .env ]; then
-    set -a
-    source .env
-    set +a
+# ── Check BW_SESSION ─────────────────────────────────────────────────
+if [ -z "${BW_SESSION:-}" ]; then
+    echo -e "${RED}Error: BW_SESSION is not set.${NC}"
+    echo ""
+    echo "Unlock your vault first:"
+    echo "  export BW_SESSION=\$(bw unlock --raw)"
+    echo ""
+    echo "Then re-run this script:"
+    echo "  bash scripts/upload-secrets.sh"
+    exit 1
+fi
+
+# ── Helper: create or update a vault item ────────────────────────────
+# Uses type 2 (Secure Note) to avoid the Login type's uris bug.
+# Stores values as custom fields, which bw_export() reads via bw_get().
+create_item() {
+    local name="$1"
+    shift
+    # remaining args are field_name=field_value pairs
+
+    # Check if item already exists
+    if bw get item "$name" --session "$BW_SESSION" &>/dev/null; then
+        echo -e "${YELLOW}  ⟳ $name already exists — skipping (delete it first to recreate)${NC}"
+        return 0
+    fi
+
+    # Build fields JSON array
+    local fields="["
+    local first=true
+    for pair in "$@"; do
+        local fname="${pair%%=*}"
+        local fvalue="${pair#*=}"
+        if [ "$first" = true ]; then
+            first=false
+        else
+            fields+=","
+        fi
+        fields+="{\"name\":\"$fname\",\"value\":\"$fvalue\",\"type\":0}"
+    done
+    fields+="]"
+
+    # type 2 = Secure Note (avoids the Login uris bug in bw CLI)
+    local json="{\"type\":2,\"secureNote\":{\"type\":0},\"name\":\"$name\",\"notes\":\"\",\"fields\":$fields}"
+
+    local encoded
+    encoded=$(echo "$json" | bw encode)
+    if bw create item "$encoded" --session "$BW_SESSION" > /dev/null 2>&1; then
+        echo -e "${GREEN}  ✓ $name created${NC}"
+    else
+        echo -e "${RED}  ✗ $name failed to create${NC}"
+        return 1
+    fi
+}
+
+# ── Collect values from user ─────────────────────────────────────────
+echo ""
+echo "=========================================="
+echo " Bitwarden Vault Setup for PEH Book"
+echo "=========================================="
+echo ""
+echo "This script creates all the vault items needed across the book."
+echo "Press Enter to accept the [default] value shown in brackets."
+echo ""
+
+# GitHub PAT
+echo -e "${YELLOW}── GitHub (used in Ch6, Ch7, Ch8) ──${NC}"
+read -rp "GitHub Personal Access Token (ghp_...): " GITHUB_TOKEN_INPUT
+read -rp "GitHub Org or Username [platformetrics]: " GITHUB_ORG_INPUT
+GITHUB_ORG_INPUT="${GITHUB_ORG_INPUT:-platformetrics}"
+
+# Keycloak
+echo ""
+echo -e "${YELLOW}── Keycloak (used in Ch3) ──${NC}"
+read -rp "Keycloak admin username [admin]: " KC_USER
+KC_USER="${KC_USER:-admin}"
+read -rp "Keycloak admin password [admin]: " KC_PASS
+KC_PASS="${KC_PASS:-admin}"
+read -rp "Keycloak URL [http://localhost:8180]: " KC_URL
+KC_URL="${KC_URL:-http://localhost:8180}"
+
+# PostgreSQL
+echo ""
+echo -e "${YELLOW}── PostgreSQL (used in Ch9) ──${NC}"
+read -rp "PostgreSQL password [platformdev123]: " PG_PASS
+PG_PASS="${PG_PASS:-platformdev123}"
+
+# Backstage
+echo ""
+echo -e "${YELLOW}── Backstage (used in Ch10) ──${NC}"
+read -rp "Backstage URL [http://localhost:7007]: " BS_URL
+BS_URL="${BS_URL:-http://localhost:7007}"
+read -rp "Backstage API token (or press Enter to skip): " BS_TOKEN
+
+# OpenAI (optional)
+echo ""
+echo -e "${YELLOW}── OpenAI (used in Ch14, optional) ──${NC}"
+read -rp "OpenAI API key (sk-... or press Enter to skip): " OPENAI_KEY
+
+# ── Create vault items ───────────────────────────────────────────────
+echo ""
+echo "Creating vault items..."
+echo ""
+
+# peh-github
+if [ -n "$GITHUB_TOKEN_INPUT" ]; then
+    create_item "peh-github" "password=$GITHUB_TOKEN_INPUT" "org=$GITHUB_ORG_INPUT"
 else
-    echo "Error: .env file not found."
-    echo "Create it from .env_example:  cp .env_example .env"
-    exit 1
+    echo -e "${YELLOW}  ⏭ peh-github skipped (no token provided)${NC}"
 fi
 
-# ── Verify required environment variables ────────────────────────────
-if [ -z "${BW_CLIENTID:-}" ] || [ -z "${BW_CLIENTSECRET:-}" ] || [ -z "${BW_PASSWORD:-}" ]; then
-    echo "Error: Required Bitwarden credentials not set in .env"
-    echo "Need: BW_CLIENTID, BW_CLIENTSECRET, BW_PASSWORD"
-    exit 1
-fi
+# peh-keycloak
+create_item "peh-keycloak" "username=$KC_USER" "password=$KC_PASS" "uri=$KC_URL"
 
-# ── Authenticate ─────────────────────────────────────────────────────
-echo "Logging into Bitwarden using API credentials..."
-bw login --apikey 2>/dev/null || echo "(Already logged in)"
+# peh-db
+create_item "peh-db" "postgres_password=$PG_PASS"
 
-echo "Unlocking Bitwarden vault..."
-export BW_SESSION=$(bw unlock --passwordenv BW_PASSWORD --raw)
-
-if [ -z "$BW_SESSION" ]; then
-    echo "Error: Failed to unlock vault. Check your BW_PASSWORD."
-    exit 1
-fi
-
-# ── Create the GitHub Secrets item ───────────────────────────────────
-echo "Creating GitHub Secrets item in Bitwarden..."
-
-# Locate the JSON template
-if [ -f "$SCRIPT_DIR/../secrets-setup/github_secrets.json" ]; then
-    JSON_FILE="$SCRIPT_DIR/../secrets-setup/github_secrets.json"
-elif [ -f "secrets-setup/github_secrets.json" ]; then
-    JSON_FILE="secrets-setup/github_secrets.json"
+# peh-backstage
+if [ -n "$BS_TOKEN" ]; then
+    create_item "peh-backstage" "uri=$BS_URL" "password=$BS_TOKEN"
 else
-    echo "Error: secrets-setup/github_secrets.json not found"
-    exit 1
+    create_item "peh-backstage" "uri=$BS_URL"
+    echo -e "${YELLOW}    (no API token yet — update later when Backstage is running)${NC}"
 fi
 
-# bw create item expects base64-encoded JSON
-ENCODED=$(cat "$JSON_FILE" | bw encode)
-bw create item "$ENCODED"
+# peh-openai
+if [ -n "$OPENAI_KEY" ]; then
+    create_item "peh-openai" "password=$OPENAI_KEY"
+else
+    echo -e "${YELLOW}  ⏭ peh-openai skipped (no key provided)${NC}"
+fi
 
-# ── Sync and lock ────────────────────────────────────────────────────
-echo "Syncing Bitwarden vault..."
-bw sync
-
-echo "Locking Bitwarden vault..."
-bw lock
+# ── Sync ─────────────────────────────────────────────────────────────
+echo ""
+bw sync --session "$BW_SESSION" > /dev/null 2>&1
+echo -e "${GREEN}Vault synced.${NC}"
 
 echo ""
-echo "Successfully uploaded secrets to Bitwarden"
-exit 0
+echo "=========================================="
+echo " Done! Vault items are ready."
+echo "=========================================="
+echo ""
+echo "Each chapter's load-secrets.sh will now pull"
+echo "credentials automatically. Usage:"
+echo ""
+echo "  export BW_SESSION=\$(bw unlock --raw)"
+echo "  cd ChXX"
+echo "  source load-secrets.sh"
+echo ""

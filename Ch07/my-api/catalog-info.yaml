@@ -1,0 +1,18 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: my-api
+  namespace: platform-team
+  description: RESTful API service
+  links:
+    - url: git@github.com:platform-team/my-api.git
+      title: Repository
+  tags:
+    - platform
+spec:
+  type: service
+  owner: platform-team
+  lifecycle: production
+  definition:
+    type: kubernetes
+    target: team-platform-team

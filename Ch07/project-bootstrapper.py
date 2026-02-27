@@ -828,9 +828,17 @@ if __name__ == '__main__':
                 )
                 
                 if success:
+                    # Write files to disk
+                    project_dir = os.path.join(os.getcwd(), project)
+                    for filepath, content in project_info['files'].items():
+                        full_path = os.path.join(project_dir, filepath)
+                        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                        with open(full_path, 'w') as f:
+                            f.write(content)
                     print(f"Project {project} bootstrapped successfully!")
                     print(f"Repository: {project_info['repo_url']}")
                     print(f"Files created: {len(project_info['files'])}")
+                    print(f"Project directory: ./{project}")
                 else:
                     print(f"Error: {error}")
             else:

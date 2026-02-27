@@ -9,7 +9,7 @@ import os
 import sys
 import json
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 GITHUB_API_BASE = "https://api.github.com"
@@ -48,7 +48,7 @@ class CIMetricsCollector:
         Returns:
             List of workflow runs
         """
-        since_date = (datetime.utcnow() - timedelta(days=days_back)).isoformat()
+        since_date = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
 
         url = (
             f"{GITHUB_API_BASE}/repos/{self.owner}/{self.repo}/"
@@ -181,7 +181,7 @@ class CIMetricsCollector:
             Dictionary with metrics for all workflows
         """
         all_metrics = {
-            "collected_at": datetime.utcnow().isoformat(),
+            "collected_at": datetime.now(timezone.utc).isoformat(),
             "repository": f"{self.owner}/{self.repo}",
             "workflows": {},
         }

@@ -1,0 +1,16 @@
+apiVersion: database.platform.io/v1alpha1
+kind: MongoDBClaim
+metadata:
+  name: ${{ values.serviceName }}-db
+  namespace: ${{ values.team }}
+spec:
+  parameters:
+    storageGB: 20
+    version: "7.0"
+    tier: development
+    enableBackups: false
+  compositionSelector:
+    matchLabels:
+      provider: kubernetes
+  writeConnectionSecretToRef:
+    name: ${{ values.serviceName }}-db-connection

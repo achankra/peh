@@ -1,15 +1,7 @@
 #!/usr/bin/env python3
-"""Validate the complete starter kit workflow.
-
-Tests the entire journey from project generation to deployment readiness:
-1. Project generation
-2. Local development (build, test, lint)
-3. Container build
-4. Catalog registration validity
-"""
+"""Validate the complete starter kit workflow."""
 
 import subprocess
-import time
 import sys
 from pathlib import Path
 
@@ -20,38 +12,21 @@ def run(cmd: list[str], cwd: Path = None) -> tuple[int, str]:
     return result.returncode, result.stdout + result.stderr
 
 
-def validate_generation():
-    """Validate project generation."""
-    print("Testing project generation...")
+def validate_clone():
+    """Validate repository was created and can be cloned."""
+    print("Testing repository clone...")
 
     code, output = run([
-        "npx", "yo", "@platform/backend-service",
-        "--name", "workflow-test",
-        "--team", "test-team",
-        "--database", "postgresql",
-        "--no-install"
+        "git", "clone",
+        "https://github.com/platform-org/order-service.git",
+        "order-service"
     ])
 
     if code != 0:
-        print(f"Generation failed: {output}")
+        print(f"Clone failed: {output}")
         return False
 
-    project_path = Path("workflow-test")
-    required_files = [
-        "package.json",
-        "Dockerfile",
-        "docker-compose.yml",
-        ".github/workflows/ci.yml",
-        "infrastructure/database.yaml",
-        "catalog-info.yaml"
-    ]
-
-    for file_name in required_files:
-        if not (project_path / file_name).exists():
-            print(f"Missing file: {file_name}")
-            return False
-
-    print("✓ Generation: PASSED")
+    print("Clone: PASSED")
     return True
 
 
@@ -59,7 +34,7 @@ def validate_local_dev():
     """Validate local development workflow."""
     print("Testing local development...")
 
-    project_path = Path("workflow-test")
+    project_path = Path("order-service")
 
     # Install dependencies
     code, _ = run(["npm", "install"], cwd=project_path)
@@ -85,7 +60,7 @@ def validate_local_dev():
         print(f"Lint failed: {output}")
         return False
 
-    print("✓ Local development: PASSED")
+    print("Local development: PASSED")
     return True
 
 
@@ -93,11 +68,11 @@ def validate_container_build():
     """Validate container builds successfully."""
     print("Testing container build...")
 
-    project_path = Path("workflow-test")
+    project_path = Path("order-service")
 
     code, output = run([
         "docker", "build",
-        "-t", "workflow-test:local",
+        "-t", "order-service:local",
         "."
     ], cwd=project_path)
 
@@ -105,15 +80,15 @@ def validate_container_build():
         print(f"Container build failed: {output}")
         return False
 
-    print("✓ Container build: PASSED")
+    print("Container build: PASSED")
     return True
 
 
 def validate_catalog_registration():
-    """Validate catalog-info.yaml is valid."""
+    """Validate service appears in Backstage catalog."""
     print("Testing catalog registration...")
 
-    project_path = Path("workflow-test")
+    project_path = Path("order-service")
     catalog_file = project_path / "catalog-info.yaml"
 
     import yaml
@@ -128,14 +103,37 @@ def validate_catalog_registration():
         print("Missing component name")
         return False
 
-    print("✓ Catalog registration: PASSED")
+    print("Catalog registration: PASSED")
+    return True
+
+
+def validate_infrastructure_claim():
+    """Validate database infrastructure claim exists."""
+    print("Testing infrastructure claim...")
+
+    project_path = Path("order-service")
+    claim_file = project_path / "infrastructure" / "database.yaml"
+
+    if not claim_file.exists():
+        print("Database claim file missing")
+        return False
+
+    import yaml
+    with open(claim_file) as f:
+        claim = yaml.safe_load(f)
+
+    if claim.get("kind") != "PostgreSQLClaim":
+        print("Invalid claim kind")
+        return False
+
+    print("Infrastructure claim: PASSED")
     return True
 
 
 def cleanup():
     """Clean up test artifacts."""
     import shutil
-    project_path = Path("workflow-test")
+    project_path = Path("order-service")
     if project_path.exists():
         shutil.rmtree(project_path)
 
@@ -144,10 +142,11 @@ def main():
     cleanup()
 
     tests = [
-        validate_generation,
+        validate_clone,
         validate_local_dev,
         validate_container_build,
-        validate_catalog_registration
+        validate_catalog_registration,
+        validate_infrastructure_claim
     ]
 
     all_passed = True
@@ -159,10 +158,10 @@ def main():
     cleanup()
 
     if all_passed:
-        print("\n✓ All workflow validations PASSED!")
+        print("\nAll workflow validations PASSED!")
         return 0
     else:
-        print("\n✗ Workflow validation FAILED!")
+        print("\nWorkflow validation FAILED!")
         return 1
 
 

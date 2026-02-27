@@ -1,0 +1,45 @@
+{
+  "name": "${{ values.serviceName }}",
+  "version": "0.1.0",
+  "description": "${{ values.description }}",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint --ext .ts src/",
+    "lint:fix": "eslint --ext .ts src/ --fix",
+    "format": "prettier --write src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "pino": "^8.16.0",
+    "pino-http": "^8.5.0",
+    "@opentelemetry/api": "^1.6.0",
+    "@opentelemetry/sdk-node": "^0.44.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.39.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.20",
+    "@types/node": "^20.9.0",
+    "typescript": "^5.2.2",
+    "tsx": "^4.1.1",
+    "vitest": "^0.34.6",
+    "eslint": "^8.53.0",
+    "@typescript-eslint/parser": "^6.11.0",
+    "@typescript-eslint/eslint-plugin": "^6.11.0",
+    "prettier": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "platformMetadata": {
+    "team": "${{ values.team }}",
+    "templateName": "backend-service",
+    "templateVersion": "${{ values.templateVersion }}",
+    "generatedAt": "${{ values.year }}"
+  }
+}

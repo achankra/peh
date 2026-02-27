@@ -1,0 +1,41 @@
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Artifacts
+build/
+dist/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+node_modules/
+vendor/
+
+# Secrets
+.env
+.env.local
+secrets/
+credentials/
+
+# Logs
+*.log
+logs/
+
+# CI/CD
+.github/workflows/secrets.yml
+
+# Python
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+pip-log.txt

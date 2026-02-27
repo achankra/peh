@@ -60,7 +60,7 @@ By implementing these patterns, teams can:
 
 | File | Purpose | Chapter Section | Key Concepts |
 |------|---------|-----------------|--------------|
-| **load-secrets.sh** | Load GitHub token from Bitwarden | Secrets Management (cross-chapter) | Retrieves `GITHUB_TOKEN` and `GITHUB_ORG` from vault. Sources `bw-helper.sh` from Ch1. |
+| **load-secrets.sh** | Load GitHub token from Bitwarden (optional) | Secrets Management (cross-chapter) | Retrieves `GITHUB_TOKEN` and `GITHUB_ORG` from vault. Requires `bw-helper.sh` from Ch1. For local testing, set env vars manually instead. |
 
 ## Orphan Files
 
@@ -77,7 +77,7 @@ By implementing these patterns, teams can:
 
 ### Python Dependencies
 ```bash
-pip install flask pyyaml kubernetes
+pip install flask pyyaml kubernetes --break-system-packages
 ```
 
 ### Node.js Dependencies
@@ -106,6 +106,16 @@ export GITHUB_TOKEN=<your-github-token>       # For Git operations (or use: sour
 
 ## Step-by-Step Instructions
 
+### Important: Filename Fix
+
+The audit logger file is named `audit-logger.py` (with a hyphen), but Python's `import` statement requires underscores. Several scripts (`onboarding-api.py`, `permission-delegation.py`, `project-bootstrapper.py`) import it as `from audit_logger import AuditLogger`. Before running any scripts, create a copy with the correct name:
+
+```bash
+cp audit-logger.py audit_logger.py
+```
+
+Without this, you'll see: `ModuleNotFoundError: No module named 'audit_logger'`
+
 ### Phase 1: API Setup and Team Provisioning
 
 #### Step 1: Review the OpenAPI Specification
@@ -123,7 +133,7 @@ Expected output: YAML document defining `/teams` (POST, GET, DELETE) and `/teams
 Launch the Flask-based REST API. This server will handle all team provisioning requests:
 
 ```bash
-python onboarding-api.py
+python3 onboarding-api.py
 ```
 
 Expected output:
@@ -241,7 +251,7 @@ Expected output:
 Enable team leads to grant permissions to members without platform intervention:
 
 ```bash
-python permission-delegation.py grant-role platform-team bob@example.com developer
+python3 permission-delegation.py grant-role platform-team bob@example.com developer
 ```
 
 Expected output: `Granted developer role to bob@example.com`
@@ -258,7 +268,7 @@ This grants all permissions associated with the developer role:
 View available roles and permissions:
 
 ```bash
-python permission-delegation.py list-roles
+python3 permission-delegation.py list-roles
 ```
 
 Expected output: Lists all permissions for lead, developer, and viewer roles.
@@ -266,7 +276,7 @@ Expected output: Lists all permissions for lead, developer, and viewer roles.
 Check a member's specific permissions:
 
 ```bash
-python permission-delegation.py list-member platform-team bob@example.com
+python3 permission-delegation.py list-member platform-team bob@example.com
 ```
 
 Expected output:
@@ -287,7 +297,7 @@ Permissions for bob@example.com in platform-team:
 Check if a user has a specific permission:
 
 ```bash
-python permission-delegation.py check platform-team bob@example.com create-projects
+python3 permission-delegation.py check platform-team bob@example.com create-projects
 ```
 
 Expected output: `bob@example.com has create-projects: True`
@@ -295,7 +305,7 @@ Expected output: `bob@example.com has create-projects: True`
 Revoke a permission if needed:
 
 ```bash
-python permission-delegation.py revoke platform-team bob@example.com manage-ci-cd alice@example.com
+python3 permission-delegation.py revoke platform-team bob@example.com manage-ci-cd alice@example.com
 ```
 
 Expected output: `Revoked manage-ci-cd from bob@example.com`
@@ -308,17 +318,18 @@ Expected output: `Revoked manage-ci-cd from bob@example.com`
 Create a complete project with repository, CI/CD pipeline, Kubernetes manifests, and Backstage catalog entry:
 
 ```bash
-python project-bootstrapper.py bootstrap platform-team my-api python "RESTful API service"
+python3 project-bootstrapper.py bootstrap platform-team my-api python "RESTful API service"
 ```
 
 Expected output:
 ```
 Project my-api bootstrapped successfully!
 Repository: git@github.com:platform-team/my-api.git
-Files created: 15
+Files created: 11
+Project directory: ./my-api
 ```
 
-This creates:
+The bootstrapper writes all files to a `./my-api/` directory in your current working directory. This creates:
 - README.md with getting started instructions
 - Dockerfile with multi-stage build
 - .github/workflows/ci.yml for GitHub Actions CI/CD
@@ -326,10 +337,15 @@ This creates:
 - catalog-info.yaml for Backstage registration
 - Language-specific files (main.py, requirements.txt, etc.)
 
+Verify the files were created:
+```bash
+ls -R my-api/
+```
+
 View available templates:
 
 ```bash
-python project-bootstrapper.py templates
+python3 project-bootstrapper.py templates
 ```
 
 Expected output:
@@ -344,7 +360,7 @@ Available templates:
 **Next step**: Proceed to Step 8.
 
 #### Step 8: Review Bootstrapped Project Structure
-Examine the files created for your project. The bootstrapper generates:
+Examine the files created in the `./my-api/` directory. Run `ls -R my-api/` to see the full tree. The bootstrapper generates:
 
 ```
 my-api/
@@ -378,7 +394,7 @@ Key features of bootstrapped projects:
 All onboarding actions are logged for compliance and troubleshooting:
 
 ```bash
-python audit-logger.py show
+python3 audit-logger.py show
 ```
 
 Expected output:
@@ -410,7 +426,7 @@ Showing N audit events (max 50):
 Get audit statistics:
 
 ```bash
-python audit-logger.py stats
+python3 audit-logger.py stats
 ```
 
 Expected output:
@@ -449,13 +465,13 @@ Statuses: {
 View failed operations for troubleshooting:
 
 ```bash
-python audit-logger.py failures
+python3 audit-logger.py failures
 ```
 
 Get history for a specific team:
 
 ```bash
-python -c "from audit_logger import AuditLogger, print_audit_events; \
+python3 -c "from audit_logger import AuditLogger, print_audit_events; \
 logger = AuditLogger(); \
 events = logger.get_team_history('platform-team'); \
 print_audit_events(events)"
@@ -467,7 +483,7 @@ print_audit_events(events)"
 Validate the implementation:
 
 ```bash
-python test-onboarding.py
+python3 test-onboarding.py
 ```
 
 Expected output:
@@ -509,13 +525,13 @@ curl -X POST http://localhost:5000/teams \
 
 **Member Addition**: Adding a member that's already in a team returns success:
 ```bash
-python permission-delegation.py grant platform-team bob@example.com create-projects alice@example.com
+python3 permission-delegation.py grant platform-team bob@example.com create-projects alice@example.com
 # Safe to run multiple times - permission is only granted once
 ```
 
 **Project Bootstrapping**: Re-running updates existing configurations:
 ```bash
-python project-bootstrapper.py bootstrap platform-team my-api python "Updated description"
+python3 project-bootstrapper.py bootstrap platform-team my-api python "Updated description"
 # Updates catalog entry and manifests without corruption
 ```
 
@@ -649,16 +665,22 @@ Optimize for production:
 
 ## Troubleshooting
 
+### ModuleNotFoundError: No module named 'audit_logger'
+The file is named `audit-logger.py` (hyphen) but Python imports require underscores. Fix:
+```bash
+cp audit-logger.py audit_logger.py
+```
+
 ### API fails to start
 ```bash
 # Check Flask installation
-python -c "import flask; print(flask.__version__)"
+python3 -c "import flask; print(flask.__version__)"
 
 # Verify port 5000 is available
 lsof -i :5000
 
 # Check detailed error logs
-ONBOARDING_API_DEBUG=True python onboarding-api.py
+ONBOARDING_API_DEBUG=True python3 onboarding-api.py
 ```
 
 ### Namespace creation fails
@@ -682,13 +704,13 @@ curl -X POST http://localhost:5000/teams \
 curl http://localhost:5000/teams/platform-team
 
 # Check audit logs for errors
-python audit-logger.py failures
+python3 audit-logger.py failures
 
 # Verify member is in team
 curl http://localhost:5000/teams/platform-team/members
 
 # Debug permission check
-python -c "from permission_delegation import PermissionManager; \
+python3 -c "from permission_delegation import PermissionManager; \
 m = PermissionManager(); \
 print(m.has_permission('platform-team', 'bob@example.com', 'create-projects'))"
 ```
@@ -696,10 +718,10 @@ print(m.has_permission('platform-team', 'bob@example.com', 'create-projects'))"
 ### Project bootstrap creates unexpected files
 ```bash
 # Verify template is correct
-python project-bootstrapper.py templates
+python3 project-bootstrapper.py templates
 
 # Check project info structure
-python -c "from project_bootstrapper import ProjectBootstrapper; \
+python3 -c "from project_bootstrapper import ProjectBootstrapper; \
 pb = ProjectBootstrapper(); \
 success, error, info = pb.bootstrap('platform-team', 'test-project', 'python'); \
 print(f'Files: {list(info[\"files\"].keys())}')"

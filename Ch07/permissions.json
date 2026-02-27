@@ -1,0 +1,13 @@
+{
+  "platform-team": {
+    "bob@example.com": [
+      "create-projects",
+      "manage-ci-cd",
+      "manage-deployments",
+      "manage-projects",
+      "manage-secrets",
+      "view-audit-logs",
+      "view-projects"
+    ]
+  }
+}
