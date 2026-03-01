@@ -5,18 +5,18 @@
 apiVersion: templates.gatekeeper.sh/v1
 kind: ConstraintTemplate
 metadata:
-  name: k8sdenyprilegedcontainers
+  name: k8sdenyprivilegedcontainers
   annotations:
     description: "Denies privileged containers and unsafe security contexts"
     examples: |
       Non-compliant (privileged):
       securityContext:
         privileged: true  # VIOLATION
-      
+
       Non-compliant (runAsRoot):
       securityContext:
         runAsUser: 0  # Root - VIOLATION
-      
+
       Compliant (non-privileged):
       securityContext:
         privileged: false
@@ -42,10 +42,10 @@ spec:
   targets:
     - target: admission.k8s.gatekeeper.sh
       rego: |
-        package k8sdenyprilegedcontainers
+        package k8sdenyprivilegedcontainers
 
         # Deny privileged containers
-        deny[msg] {
+        violation[{"msg": msg}] {
           container := input_containers[_]
           not is_exempt_image(container.image)
           is_privileged(container)
@@ -56,7 +56,7 @@ spec:
         }
 
         # Deny containers running as root
-        deny[msg] {
+        violation[{"msg": msg}] {
           container := input_containers[_]
           not is_exempt_image(container.image)
           is_running_as_root(container)
@@ -67,7 +67,7 @@ spec:
         }
 
         # Deny privilege escalation
-        deny[msg] {
+        violation[{"msg": msg}] {
           container := input_containers[_]
           not is_exempt_image(container.image)
           allows_privilege_escalation(container)
@@ -106,100 +106,3 @@ spec:
         input_containers[c] {
           c := input.review.object.spec.initContainers[_]
         }
-
----
-apiVersion: constraints.gatekeeper.sh/v1beta1
-kind: K8sDenyPrivilegedContainers
-metadata:
-  name: deny-privileged-containers
-spec:
-  match:
-    excludedNamespaces:
-      - gatekeeper-system
-      - kube-system
-      - kube-public
-    kinds:
-      - apiGroups: [""]
-        kinds: ["Pod"]
-      - apiGroups: ["apps"]
-        kinds: ["Deployment", "DaemonSet", "StatefulSet"]
-      - apiGroups: ["batch"]
-        kinds: ["Job", "CronJob"]
-
-  parameters:
-    # Exempt system images that legitimately need privilege
-    exemptImages:
-      - gcr.io/gke-release/
-      - docker.io/library/pause
-      - k8s.gcr.io/pause
-
-  auditOnly: true
-
----
-# Example: Non-compliant (privileged)
-# apiVersion: v1
-# kind: Pod
-# metadata:
-#   name: privileged-pod
-# spec:
-#   containers:
-#   - name: app
-#     image: gcr.io/my-project/myapp:v1.0.0
-#     securityContext:
-#       privileged: true  # VIOLATION
-
----
-# Example: Non-compliant (running as root)
-# apiVersion: v1
-# kind: Pod
-# metadata:
-#   name: root-pod
-# spec:
-#   securityContext:
-#     runAsUser: 0  # VIOLATION - Root user
-
----
-# Example: Compliant (hardened security)
-# apiVersion: v1
-# kind: Pod
-# metadata:
-#   name: secure-pod
-# spec:
-#   securityContext:
-#     runAsNonRoot: true
-#     runAsUser: 1000
-#     fsGroup: 1000
-#   containers:
-#   - name: app
-#     image: gcr.io/my-project/myapp:v1.0.0
-#     securityContext:
-#       privileged: false
-#       allowPrivilegeEscalation: false
-#       readOnlyRootFilesystem: true
-#       capabilities:
-#         drop:
-#           - ALL
-
----
-# Security hardening best practices:
-# 
-# 1. Privilege restriction:
-#    - privileged: false (default)
-#    - allowPrivilegeEscalation: false
-#    - capabilities: drop ALL
-#
-# 2. User context:
-#    - runAsNonRoot: true
-#    - runAsUser: 1000+ (non-root UID)
-#    - fsGroup: 1000+ (for volume mounts)
-#
-# 3. Filesystem:
-#    - readOnlyRootFilesystem: true
-#    - volumeMounts for writable data
-#
-# 4. When is privilege needed?
-#    - Network management (privileged network)
-#    - Kernel tuning (sysctl)
-#    - Hardware access (devices)
-#    - Host filesystem access
-#    Solution: Use sidecar or network policies instead

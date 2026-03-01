@@ -3,7 +3,7 @@
 # This template creates a new policy kind: K8sRequiredResources
 # that validates all containers have resource requests and limits.
 
-apiVersion: constraints.gatekeeper.sh/v1beta1
+apiVersion: templates.gatekeeper.sh/v1beta1
 kind: ConstraintTemplate
 metadata:
   name: k8srequiredresources

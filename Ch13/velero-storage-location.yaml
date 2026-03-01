@@ -36,16 +36,11 @@ spec:
     # No TLS for local MinIO
     insecureSkipTLSVerify: "true"
 
-    # Disable checksum validation (not needed for local)
-    checksumAlgorithm: ""
-
   # Access credentials
   credential:
     name: velero-minio-credentials
     key: cloud
 
-  # Validation settings
-  validationFrequency: 0h
   accessMode: ReadWrite
 
   # Default backup location

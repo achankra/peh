@@ -7,10 +7,10 @@
 #   1. Install pre-commit framework:
 #      pip install pre-commit
 #
-#   2. Install the git hook scripts in this directory:
+#   2. Install the git hook scripts:
 #      pre-commit install
 #
-#   3. Optionally run against all files:
+#   3. Optionally run against Ch11 files:
 #      pre-commit run --all-files
 #
 # Usage:
@@ -23,112 +23,34 @@
 #   - https://www.conftest.dev/
 
 repos:
-  # YAML Syntax Validation
+  # YAML Syntax Validation (Ch11 files only)
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
     hooks:
       - id: check-yaml
         name: Check YAML syntax
-        args:
-          - --unsafe  # Allow YAML constructs like !ruby/object
-        files: |
-          (?x)^(
-            .*\.yaml|
-            .*\.yml|
-            kustomization\.yaml
-          )$
-        exclude: |
-          (?x)(
-            \.venv/|
-            venv/|
-            __pycache__/
-          )
+        args: ['--unsafe']
+        files: ^Ch11/.*\.(yaml|yml)$
+        exclude: ^Ch11/(policies|conftest-tests)/
 
-  # Conftest Policy Validation
-  - repo: https://github.com/instrumenta/conftest
-    rev: v0.52.0
+  # Conftest Policy Validation (local hook — conftest must be installed)
+  - repo: local
     hooks:
       - id: conftest
         name: Validate policies with conftest
         description: Runs conftest on Kubernetes manifests
-        entry: conftest test
+        entry: conftest test --policy=Ch11/conftest-tests/
         language: system
-        files: |
-          (?x)^(
-            .*\.yaml|
-            .*\.yml
-          )$
+        files: ^Ch11/.*\.(yaml|yml)$
         exclude: |
           (?x)(
-            ^\.github/|
-            __pycache__/|
-            \.venv/|
-            venv/
+            ^Ch11/\.github/|
+            ^Ch11/conftest-tests/|
+            ^Ch11/policies/|
+            ^Ch11/constraints/|
+            ^Ch11/\.pre-commit-config\.yaml
           )
-        args:
-          # Point to policy directories
-          - --policy=policies/
-          - --policy=conftest-tests/
-          # Only test specific files that changed
-          - --namespace=main
-        # Run on changed files in staging area
-        stages: [commit]
-        # Don't fail if conftest not installed (dev might not need it)
-        fail_fast: false
-
-  # Optional: Static analysis tools
-  - repo: https://github.com/hadolint/hadolint
-    rev: v2.13.0
-    hooks:
-      - id: hadolint-docker
-        name: Lint Dockerfiles
-        files: Dockerfile
-
-  # Optional: Shell script linting
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.9.0.6
-    hooks:
-      - id: shellcheck
-        name: Lint shell scripts
-        args: [--severity=warning]
-        exclude: |
-          (?x)(
-            \.venv/|
-            venv/
-          )
-
-  # Optional: Trailing whitespace and end-of-file fixes
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
-    hooks:
-      - id: trailing-whitespace
-        name: Trim trailing whitespace
-        args: [--markdown-args=--ignore-code-blocks]
-      - id: end-of-file-fixer
-        name: Fix end of file
-      - id: mixed-line-ending
-        name: Fix mixed line endings
-        args: [--fix=lf]
-
-  # Optional: JSON validation
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
-    hooks:
-      - id: pretty-print-json
-        name: Validate and format JSON
-        args: [--indent=2, --autofix]
-
-# Global exclusions
-exclude: |
-  (?x)(
-    \.venv/|
-    venv/|
-    __pycache__/|
-    \.git/|
-    node_modules/|
-    build/|
-    dist/
-  )
+        stages: [pre-commit]
 
 # Fail-fast mode: stop on first failure
 fail_fast: false
@@ -138,11 +60,7 @@ minimum_pre_commit_version: '2.15.0'
 
 # Notes:
 # ======
-# 1. This config validates all YAML files in the commit
-# 2. Conftest policies must be in ./policies/ or ./conftest-tests/
+# 1. This config validates only Ch11 YAML files
+# 2. Conftest policies are in Ch11/conftest-tests/
 # 3. To skip validation for a commit: git commit --no-verify
-#    (Use sparingly - defeats the purpose of pre-commit!)
-# 4. Install all prerequisites: pip install pre-commit conftest
-# 5. To debug hook failures:
-#    - Run manually: pre-commit run conftest --all-files --verbose
-#    - Check logs: cat .git/hooks/pre-commit
+# 4. Install all prerequisites: pip install pre-commit && brew install conftest

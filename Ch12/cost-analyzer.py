@@ -213,8 +213,8 @@ class CostAnalyzer:
         )
         
         # Calculate utilization percentages
-        cpu_util = self._calculate_utilization(used_cpu, requested_cpu)
-        mem_util = self._calculate_utilization(used_memory, requested_memory)
+        cpu_util = self._calculate_utilization(used_cpu, requested_cpu, resource_type="cpu")
+        mem_util = self._calculate_utilization(used_memory, requested_memory, resource_type="memory")
         
         # Determine if over-provisioned
         is_over_provisioned = cpu_util < 20 or mem_util < 20
@@ -232,9 +232,9 @@ class CostAnalyzer:
             recommendation=recommendation
         )
     
-    def _calculate_utilization(self, used: str, requested: str) -> float:
+    def _calculate_utilization(self, used: str, requested: str, resource_type: str = "cpu") -> float:
         """Calculate resource utilization percentage"""
-        if "cpu" in used.lower():
+        if resource_type == "cpu":
             used_val = self.converter.cpu_to_millicores(used)
             req_val = self.converter.cpu_to_millicores(requested)
         else:

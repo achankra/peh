@@ -32,10 +32,10 @@ This directory contains production-ready examples tied to specific chapter secti
 
 | File | Chapter Section | Purpose |
 |------|-----------------|---------|
-| `policies/require-resource-limits.yaml` | 11.1, 11.2 | Complete ConstraintTemplate + Constraint enforcing CPU/memory requests and limits on all containers, with helper functions and examples |
-| `policies/deny-privileged-containers.yaml` | 11.2 | ConstraintTemplate + Constraint preventing privileged containers, root execution, and privilege escalation; includes exempt images logic |
-| `policies/restrict-image-registries.yaml` | 11.2 | ConstraintTemplate + Constraint restricting container images to approved registries; includes registry extraction and allowlist matching |
-| `policies/require-labels.yaml` | 11.2 | ConstraintTemplate + Constraint mandating team, owner, and cost-center labels for accountability and chargeback |
+| `policies/require-resource-limits.yaml` | 11.1, 11.2 | ConstraintTemplate enforcing CPU/memory requests and limits on all containers, with helper functions and examples |
+| `policies/deny-privileged-containers.yaml` | 11.2 | ConstraintTemplate preventing privileged containers, root execution, and privilege escalation; includes exempt images logic |
+| `policies/restrict-image-registries.yaml` | 11.2 | ConstraintTemplate restricting container images to approved registries; includes registry extraction and allowlist matching |
+| `policies/require-labels.yaml` | 11.2 | ConstraintTemplate mandating team, owner, and cost-center labels for accountability and chargeback |
 | `policies/require-tests-passed.rego` | 11.2 (Unit Testing) | Rego policy requiring test-results="passed" annotation on Deployments (demonstrates Rego assertion patterns) |
 | `policies/require-tests-passed_test.rego` | 11.2, Listing 11.8 | Unit tests for require-tests-passed.rego policy (demonstrates Rego test syntax) |
 
@@ -44,7 +44,11 @@ This directory contains production-ready examples tied to specific chapter secti
 | File | Chapter Section | Purpose |
 |------|-----------------|---------|
 | `constraints/require-resources.yaml` | 11.1, Listing 11.2 | Constraint instance of K8sRequiredResources ConstraintTemplate, excludes system namespaces |
-| `constraints/require-compliance-labels.yaml` | 11.2 | Constraint instance enforcing team, cost-center, and compliance-level labels on Deployments |
+| `constraints/require-resource-limits.yaml` | 11.2 | Constraint instance of K8sRequireResourceLimits, enforces CPU/memory on all containers |
+| `constraints/deny-privileged-containers.yaml` | 11.2 | Constraint instance of K8sDenyPrivilegedContainers, blocks privileged pods |
+| `constraints/restrict-image-registries.yaml` | 11.2 | Constraint instance of K8sRestrictImageRegistries, enforces approved registries |
+| `constraints/require-labels.yaml` | 11.2 | Constraint instance of K8sRequireLabels, requires team/owner/cost-center labels |
+| `constraints/require-compliance-labels.yaml` | 11.2 | Constraint instance of K8sRequireLabels, enforces team, cost-center, and compliance-level labels on Deployments |
 
 ### Policy Testing Manifests
 
@@ -105,10 +109,10 @@ This directory contains production-ready examples tied to specific chapter secti
   - Installation: `brew install conftest` (macOS) or download from https://github.com/open-policy-agent/conftest/releases
 - **OPA CLI** (opa test, opa parse) for policy unit testing (installed with conftest or separately)
 - **pre-commit** framework (for shift-left validation hooks in `.pre-commit-config.yaml`)
-  - Installation: `brew install pre-commit` (macOS) or `pip install pre-commit`
+  - Installation: `brew install pre-commit` (macOS) or `pip3 install pre-commit`
 - **Python** 3.8+ (for test-policies.py, compliance-dashboard.py, and gatekeeper_exporter.py)
   ```bash
-  pip install prometheus-client kubernetes pyyaml
+  pip3 install prometheus-client kubernetes pyyaml
   ```
 
 ### Compliance Monitoring
@@ -146,7 +150,7 @@ helm repo add gatekeeper https://open-policy-agent.github.io/gatekeeper/charts
 helm repo update
 
 # Install Gatekeeper
-helm install gatekeeper/gatekeeper -n gatekeeper-system --create-namespace
+helm install gatekeeper gatekeeper/gatekeeper -n gatekeeper-system --create-namespace
 
 # Verify installation
 helm list -n gatekeeper-system
@@ -181,19 +185,29 @@ gatekeeper-webhook-6b8d4-abc12            1/1     Running   0          2m
 #### 2.1 Deploy Policy Templates & Constraints
 
 ```bash
-# Deploy all ConstraintTemplates
+# Deploy all ConstraintTemplates (standalone + policies/)
 kubectl apply -f constraint-template.yaml
 kubectl apply -f constraint-template-security-baselines.yaml
+kubectl apply -f policies/
+
+# Wait for Gatekeeper to register ALL CRDs from ConstraintTemplates
+echo 'Waiting for CRDs...'
+until kubectl get crd \
+  k8sdenyprivilegedcontainers.constraints.gatekeeper.sh \
+  k8srequirelabels.constraints.gatekeeper.sh \
+  k8srequireresourcelimits.constraints.gatekeeper.sh \
+  k8srestrictimageregistries.constraints.gatekeeper.sh \
+  k8srequiredresources.constraints.gatekeeper.sh \
+  k8ssecuritybaselines.constraints.gatekeeper.sh \
+  >/dev/null 2>&1; do sleep 3; done
+echo 'All CRDs registered!'
 
 # Verify ConstraintTemplates are created
 kubectl get constrainttemplates
-# Expected: k8srequiredresources, k8ssecuritybaselines, etc.
+# Expected: k8srequiredresources, k8ssecuritybaselines, k8srequireresourcelimits, etc.
 
-# Deploy individual policies with Constraints
-kubectl apply -f policies/require-resource-limits.yaml
-kubectl apply -f policies/deny-privileged-containers.yaml
-kubectl apply -f policies/restrict-image-registries.yaml
-kubectl apply -f policies/require-labels.yaml
+# Deploy Constraint instances (reference the CRDs created above)
+kubectl apply -f constraints/
 
 # Verify Constraints are instantiated
 kubectl get constraints -A
@@ -201,12 +215,16 @@ kubectl get constraints -A
 
 **Expected Output:**
 ```
-NAME                                 ENFORCEMENT-ACTION   STATUS
-require-resource-limits              audit                Active
-deny-privileged-containers          audit                Active
-restrict-image-registries           audit                Active
-require-labels                       audit                Active
+NAME                                 ENFORCEMENT-ACTION   TOTAL-VIOLATIONS
+deny-privileged-containers           dryrun
+require-compliance-labels            dryrun               57
+require-labels                       dryrun
+require-resource-limits              dryrun
+require-resources                    dryrun               29
+restrict-image-registries            dryrun
 ```
+
+> **Note:** All constraints use `dryrun` (audit mode) so you can monitor violations without blocking deployments. This is critical — using `deny` enforcement would block Helm installs in later chapters (e.g., OpenCost in Ch12) because third-party charts typically don't include your custom labels. Violation counts appear after Gatekeeper's next audit cycle (typically 60 seconds).
 
 #### 2.2 Check Initial Audit Results
 
@@ -226,14 +244,11 @@ done
 
 **Expected Output (Audit Mode):**
 ```
-require-resource-limits:
-  totalViolations: 47
-  violations:
-  - enforcementAction: audit
-    kind: Deployment
-    message: "Container 'api' must define CPU and memory requests/limits"
-    namespace: default
+require-resources: 29 violations
+require-compliance-labels: 57 violations
 ```
+
+> **Why so many violations?** Gatekeeper audits all existing resources in non-excluded namespaces. Most system workloads (CoreDNS, local-path-provisioner, Backstage, etc.) lack the required labels and resource annotations. This is expected — the high violation count demonstrates why starting in audit mode (`enforcementAction: dryrun`) is critical before enforcing.
 
 ### Phase 3: Shift-Left Testing with conftest
 
@@ -256,15 +271,17 @@ conftest --version
 #### 3.2 Validate Test Manifests
 
 ```bash
-# Test the provided sample manifests (should show mixed results)
-conftest test -p conftest-tests/policy.rego conftest-tests/test-manifests.yaml -v
-
-# Expected output:
-# PASS - conftest-tests/test-manifests.yaml - Data file evaluates to true.
-# ...
-# FAIL - conftest-tests/test-manifests.yaml - Container 'worker' missing CPU requests
-# FAIL - conftest-tests/test-manifests.yaml - Container 'debug' cannot run in privileged mode
+# Test the provided sample manifests (expect mixed pass/fail results)
+conftest test -p conftest-tests/policy.rego conftest-tests/test-manifests.yaml
 ```
+
+**Expected:** A mix of passes, warnings, and failures. The test manifests contain both compliant and intentionally non-compliant resources:
+
+```
+56 tests, 36 passed, 3 warnings, 17 failures, 0 exceptions
+```
+
+Failures include missing labels (`team`, `owner`, `cost-center`), missing resource limits, privileged containers, unauthorized registries, and running as root. These are intentional — the test manifests demonstrate what each policy catches. The 36 passing tests confirm that compliant resources are correctly allowed through.
 
 #### 3.3 Test Against Your Own Manifests
 
@@ -354,11 +371,13 @@ chmod +x run-conftest.sh
 
 # Run against the intentionally non-compliant test-pod-violation.yaml
 ./run-conftest.sh test-pod-violation.yaml
+```
 
-# Expected: Multiple FAIL results (no resource limits, privileged, :latest tag, missing labels, root user)
+**Expected:** Both commands will show `FAILED` in the validation summary. This is correct — the test manifests contain intentional violations to demonstrate the policies. The wrapper script adds colour-coded output and a summary count of passes vs failures, making it easy to use in CI/CD pipelines.
 
+```bash
 # Use --strict mode for CI/CD (returns non-zero exit code on any failure)
-./run-conftest.sh --strict manifests/
+./run-conftest.sh test-pod-violation.yaml --strict
 ```
 
 #### 3.6 Test Policy Violations with test-pod-violation.yaml
@@ -381,16 +400,18 @@ The `.pre-commit-config.yaml` in this directory configures automatic conftest va
 
 ```bash
 # Install pre-commit framework (if not already installed)
-pip install pre-commit
+pip3 install pre-commit
 
-# Install the hooks (from within your repo root)
+# Copy the config to your repo root and install hooks
 cp .pre-commit-config.yaml /path/to/your/repo/
 cd /path/to/your/repo
 pre-commit install
 
-# Test hooks against all existing files
-pre-commit run --all-files
+# Run the conftest hook against all Ch11 files
+pre-commit run conftest --all-files
 ```
+
+**Expected:** The conftest hook will show FAIL for files containing intentionally non-compliant manifests (like `test-pod-violation.yaml`). Infrastructure files (ConstraintTemplates, ServiceMonitors) will also fail label checks because they are not Kubernetes Deployments — conftest applies all rules uniformly. This is normal; in a real project you would scope the hook to only validate application manifests.
 
 ### Phase 4: Test Policy Enforcement
 
@@ -398,20 +419,28 @@ pre-commit run --all-files
 
 ```bash
 # Run the test-policies.py suite (offline mode - no cluster required)
-python test-policies.py
-
-# Expected output:
-# test_compliant_deployment_passes (test_policies.TestOfflineValidation) ... ok
-# test_noncompliant_missing_limits_fails (test_policies.TestOfflineValidation) ... ok
-# Ran 5 tests in 0.234s
-# OK
+python3 test-policies.py
 ```
+
+**Expected:** All 6 tests pass:
+
+```
+test_conftest_compliant_passes ... ok
+test_compliant_deployment_passes ... ok
+test_missing_labels_detected ... ok
+test_no_limits_detected ... ok
+test_privileged_container_detected ... ok
+test_untrusted_registry_detected ... ok
+Ran 6 tests in 0.2s — OK
+```
+
+The test suite validates that compliant manifests (with labels, resource limits, approved registries, and non-privileged security contexts) pass conftest, while non-compliant manifests are correctly flagged.
 
 #### 4.2 Test Against Live Cluster
 
 ```bash
 # Run integration tests against your actual Gatekeeper deployment
-python test-policies.py --live
+python3 test-policies.py --live
 
 # This will attempt to create non-compliant resources and verify they're rejected
 # Expected: Resources without proper resource limits will be rejected by Gatekeeper
@@ -419,44 +448,37 @@ python test-policies.py --live
 
 #### 4.3 Manually Test Admission Webhook
 
+All constraints ship in `dryrun` mode so they don't block Helm installs in later chapters (e.g., OpenCost in Ch12). To demonstrate live enforcement, temporarily switch one constraint to `deny`:
+
 ```bash
-# Try to deploy a non-compliant pod
-kubectl apply -f - << 'EOF'
-apiVersion: v1
-kind: Pod
-metadata:
-  name: test-missing-limits
-spec:
-  containers:
-  - name: app
-    image: nginx:latest
-    # No resources defined - violates policy
-EOF
+# Temporarily enable deny enforcement on require-resources
+kubectl patch k8srequiredresources require-resources \
+  --type merge -p '{"spec":{"enforcementAction":"deny"}}'
 
-# Expected rejection:
-# Error from server ([require-resource-limits] Container 'app' must define CPU and memory requests/limits):
-# error when creating "STDIN": admission webhook "validation.gatekeeper.sh" denied the request
+# Non-compliant: no resource limits → DENIED by Gatekeeper
+kubectl run test-noncompliant --image=nginx --dry-run=server
+```
 
-# Try to deploy a compliant pod (should succeed in audit mode)
-kubectl apply -f - << 'EOF'
-apiVersion: v1
-kind: Pod
-metadata:
-  name: test-compliant
-spec:
-  containers:
-  - name: app
-    image: nginx:latest
-    resources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-      limits:
-        cpu: 500m
-        memory: 256Mi
-EOF
+**Expected:** Gatekeeper denies the request because the pod has no resource limits:
 
-# Expected: pod/test-compliant created
+```
+Error from server (Forbidden): admission webhook "validation.gatekeeper.sh" denied the request:
+[require-resources] Container test-noncompliant is missing resource limits
+[require-resources] Container test-noncompliant is missing resource requests
+```
+
+```bash
+# Compliant: with resource limits → ACCEPTED by Gatekeeper
+kubectl run test-compliant --image=nginx --dry-run=server \
+  --overrides='{"spec":{"containers":[{"name":"nginx","image":"nginx","resources":{"limits":{"cpu":"100m","memory":"128Mi"},"requests":{"cpu":"50m","memory":"64Mi"}}}]}}'
+```
+
+**Expected:** `pod/test-compliant created (server dry run)` — Gatekeeper allows the pod because it has proper resource limits. The `--dry-run=server` flag validates against the admission webhook without actually creating the pod.
+
+```bash
+# IMPORTANT: Switch back to dryrun so later chapters are not blocked
+kubectl patch k8srequiredresources require-resources \
+  --type merge -p '{"spec":{"enforcementAction":"dryrun"}}'
 ```
 
 ### Phase 5: Set Up Compliance Monitoring
@@ -491,7 +513,7 @@ kubectl get svc -n gatekeeper-system | grep gatekeeper
 
 ```bash
 # Run the compliance dashboard generator
-python compliance-dashboard.py
+python3 compliance-dashboard.py
 
 # Output: JSON report with violations by policy, namespace, severity
 # Example output:
@@ -509,7 +531,7 @@ python compliance-dashboard.py
 # }
 
 # Generate markdown report
-python compliance-dashboard.py --format markdown --output compliance-report.md
+python3 compliance-dashboard.py --format markdown --output compliance-report.md
 cat compliance-report.md
 ```
 
@@ -541,14 +563,14 @@ For richer metrics beyond what Gatekeeper exposes natively, deploy the custom ex
 
 ```bash
 # Test locally first
-pip install prometheus_client kubernetes
-python scripts/gatekeeper_exporter.py --test
+pip3 install prometheus_client kubernetes
+python3 scripts/gatekeeper_exporter.py --once
 
-# Run the exporter (exposes metrics on :9090/metrics by default)
-python scripts/gatekeeper_exporter.py --port 9090 --interval 60
+# Run the exporter (exposes metrics on :8000/metrics by default)
+python3 scripts/gatekeeper_exporter.py --port 8000 --interval 60
 
 # Verify metrics are available
-curl http://localhost:9090/metrics | grep gatekeeper_
+curl http://localhost:8000/metrics | grep gatekeeper_
 
 # Expected: 9 metric families including:
 #   gatekeeper_violations_total
@@ -565,7 +587,7 @@ For production, deploy as a Kubernetes Deployment and add a ServiceMonitor point
 
 ```bash
 # Monitor which resources violate policies
-python compliance-dashboard.py --days 14 > week1-report.json
+python3 compliance-dashboard.py --days 14 > week1-report.json
 
 # Identify most problematic policies
 kubectl get constraints -A -o json | \
@@ -585,11 +607,11 @@ Share compliance reports with application teams:
 ```bash
 # After 2-4 weeks of monitoring, transition resource limits policy
 kubectl patch constraint require-resource-limits --type merge \
-  -p '{"spec":{"auditOnly":false}}'
+  -p '{"spec":{"enforcementAction":"deny"}}'
 
 # Verify enforcement is active
-kubectl get constraint require-resource-limits -o jsonpath='{.spec.auditOnly}'
-# Expected: false
+kubectl get constraint require-resource-limits -o jsonpath='{.spec.enforcementAction}'
+# Expected: deny
 
 # Now non-compliant deployments will be rejected
 # Try deploying a non-compliant resource
@@ -733,7 +755,7 @@ kubectl get deployment -A -o json | jq '.items[0].spec.template.spec.containers'
 conftest verify -p conftest-tests/policy.rego
 
 # Run with verbose output to see which rules are evaluated
-conftest test -v -p conftest-tests/policy.rego conftest-tests/test-manifests.yaml
+conftest test -p conftest-tests/policy.rego conftest-tests/test-manifests.yaml
 
 # Test a single file with debugging
 conftest test -p conftest-tests/policy.rego /tmp/deployment.yaml -d
@@ -766,7 +788,7 @@ kubectl patch constraint require-resource-limits --type merge \
 
 ## Best Practices
 
-1. **Start with Audit Mode**: Deploy all policies with `auditOnly: true` for 2-4 weeks. Never jump directly to enforcement.
+1. **Start with Audit Mode**: Deploy all policies with `enforcementAction: dryrun` for 2-4 weeks. Never jump directly to enforcement.
 
 2. **Monitor Violations Continuously**: Use compliance dashboards to track violations and identify patterns before enforcing.
 
@@ -819,12 +841,16 @@ Ch11/
 ├── constraint-template-security-baselines.yaml  # Security ConstraintTemplate (Listing 11.6)
 ├── constraints/                                 # Constraint instances
 │   ├── require-resources.yaml                   # Resource limits constraint (Listing 11.2)
-│   └── require-compliance-labels.yaml           # Label enforcement constraint
-├── policies/                                    # Production Rego policies
-│   ├── require-resource-limits.yaml             # Resource limits template + constraint
-│   ├── deny-privileged-containers.yaml          # Security hardening policies
-│   ├── restrict-image-registries.yaml           # Registry restriction policies
-│   ├── require-labels.yaml                      # Label requirement policies
+│   ├── require-resource-limits.yaml             # CPU/memory limits constraint
+│   ├── deny-privileged-containers.yaml          # Privileged container constraint
+│   ├── restrict-image-registries.yaml           # Registry restriction constraint
+│   ├── require-labels.yaml                      # Label requirement constraint
+│   └── require-compliance-labels.yaml           # Compliance label constraint
+├── policies/                                    # ConstraintTemplates (Rego policy definitions)
+│   ├── require-resource-limits.yaml             # Resource limits ConstraintTemplate
+│   ├── deny-privileged-containers.yaml          # Security hardening ConstraintTemplate
+│   ├── restrict-image-registries.yaml           # Registry restriction ConstraintTemplate
+│   ├── require-labels.yaml                      # Label requirement ConstraintTemplate
 │   ├── require-tests-passed.rego                # Test result validation
 │   └── require-tests-passed_test.rego           # Policy unit tests
 ├── test-pod-violation.yaml                      # Intentionally non-compliant manifests for testing
@@ -852,8 +878,11 @@ Ch11/
 kubectl apply -f gatekeeper-install.yaml                    # Deploy Gatekeeper
 kubectl get pods -n gatekeeper-system                       # Check status
 
-# Policies
-kubectl apply -f policies/                                  # Deploy all policies
+# Policies (ConstraintTemplates first, wait for CRDs, then Constraints)
+kubectl apply -f policies/
+# Wait for CRDs before applying constraints:
+until kubectl get crd k8sdenyprivilegedcontainers.constraints.gatekeeper.sh k8srequirelabels.constraints.gatekeeper.sh k8srequireresourcelimits.constraints.gatekeeper.sh k8srestrictimageregistries.constraints.gatekeeper.sh >/dev/null 2>&1; do sleep 3; done
+kubectl apply -f constraints/
 kubectl get constraints                                     # List constraints
 kubectl describe constraint require-resource-limits         # View constraint details
 kubectl get constraint -A -o json | jq '.items[].status.totalViolations'
@@ -861,20 +890,20 @@ kubectl get constraint -A -o json | jq '.items[].status.totalViolations'
 # Testing
 conftest test -p conftest-tests/policy.rego my-deployment.yaml  # Local validation
 opa test policies/ -v                                       # Unit test policies
-python test-policies.py                                     # Integration tests
+python3 test-policies.py                                     # Integration tests
 
 # Monitoring
-python compliance-dashboard.py                              # Generate compliance report
+python3 compliance-dashboard.py                              # Generate compliance report
 kubectl get constraints -o json | jq '.items[] | {name: .metadata.name, violations: .status.totalViolations}'
 
 # Enforcement
-kubectl patch constraint require-resource-limits --type merge -p '{"spec":{"auditOnly":false}}'  # Enable enforcement
+kubectl patch constraint require-resource-limits --type merge -p '{"spec":{"enforcementAction":"deny"}}'  # Enable enforcement
 kubectl patch constraint require-resource-limits --type merge -p '{"spec":{"match":{"excludedNamespaces":["kube-system"]}}}'  # Exclude namespace
 
 # Debugging
 kubectl logs -n gatekeeper-system deployment/gatekeeper-audit     # Check audit logs
 kubectl logs -n gatekeeper-system deployment/gatekeeper-controller-manager  # Check controller
-conftest test -v -p conftest-tests/policy.rego manifest.yaml    # Verbose policy output
+conftest test -p conftest-tests/policy.rego manifest.yaml    # Verbose policy output
 ```
 
 ## Additional Resources

@@ -18,7 +18,7 @@
 set -e
 
 NAMESPACE="opencost"
-PROMETHEUS_SERVER="prometheus-kube-prometheus-prometheus"
+PROMETHEUS_SERVER="monitoring-kube-prometheus-prometheus"
 PROMETHEUS_NAMESPACE="monitoring"
 
 echo "Adding OpenCost Helm repository..."
@@ -33,6 +33,7 @@ helm install opencost opencost/opencost \
   --namespace ${NAMESPACE} \
   --set opencost.prometheus.internal.serviceName="${PROMETHEUS_SERVER}" \
   --set opencost.prometheus.internal.namespaceName="${PROMETHEUS_NAMESPACE}" \
+  --set opencost.prometheus.internal.port=9090 \
   --set opencost.ui.enabled=true \
   --set opencost.exporter.defaultClusterId="platform-cluster"
 
@@ -42,8 +43,8 @@ kubectl rollout status deployment/opencost -n ${NAMESPACE} --timeout=5m
 echo "OpenCost installation completed successfully"
 echo ""
 echo "Access OpenCost UI:"
-echo "  kubectl port-forward -n ${NAMESPACE} svc/opencost 9003:9003"
-echo "  Then open http://localhost:9003 in your browser"
+echo "  kubectl port-forward -n ${NAMESPACE} svc/opencost 9090:9090"
+echo "  Then open http://localhost:9090 in your browser"
 echo ""
 echo "Query cost allocation API:"
 echo "  kubectl port-forward -n ${NAMESPACE} svc/opencost 9003:9003"

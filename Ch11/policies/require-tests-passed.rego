@@ -1,7 +1,9 @@
 package requiretestspassed
 
+import rego.v1
+
 # Deny deployments that don't have test results annotation or test-results != "passed"
-deny[msg] {
+deny contains msg if {
   input.kind == "Deployment"
   not input.metadata.annotations["test-results"]
   msg := sprintf(
@@ -10,7 +12,7 @@ deny[msg] {
   )
 }
 
-deny[msg] {
+deny contains msg if {
   input.kind == "Deployment"
   test_results := input.metadata.annotations["test-results"]
   test_results != "passed"
@@ -21,7 +23,7 @@ deny[msg] {
 }
 
 # Allow if annotation exists and is set to "passed"
-allow {
+allow if {
   input.kind == "Deployment"
   input.metadata.annotations["test-results"] == "passed"
 }

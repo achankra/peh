@@ -21,7 +21,7 @@ metadata:
           limits:
             cpu: "500m"
             memory: "512Mi"
-      
+
       Invalid example:
       containers:
       - name: app
@@ -50,14 +50,20 @@ spec:
         package k8srequireresourcelimits
 
         # Deny rule for containers without resource limits
-        deny[msg] {
+        violation[{"msg": msg}] {
           container := input_containers[_]
-          not container.name in input.parameters.excludedContainers
+          not is_excluded(container.name)
           not has_resource_limits(container)
           msg := sprintf(
             "Container '%v' must define CPU and memory requests/limits",
             [container.name]
           )
+        }
+
+        # Helper: check if container is excluded
+        is_excluded(name) {
+          excluded := input.parameters.excludedContainers[_]
+          name == excluded
         }
 
         # Helper: check if container has resource limits
@@ -77,78 +83,3 @@ spec:
         input_containers[c] {
           c := input.review.object.spec.initContainers[_]
         }
-
----
-# Constraint instantiates the policy on specific resources
-apiVersion: constraints.gatekeeper.sh/v1beta1
-kind: K8sRequireResourceLimits
-metadata:
-  name: require-resource-limits
-spec:
-  # Start in audit mode to avoid blocking deployments immediately
-  # Change to false to enable enforcement
-  match:
-    # Exclude system namespaces
-    excludedNamespaces: 
-      - gatekeeper-system
-      - kube-system
-      - kube-public
-      - kube-node-lease
-    
-    # Resources to validate
-    kinds:
-      - apiGroups: [""]
-        kinds: ["Pod"]
-      - apiGroups: ["apps"]
-        kinds: ["Deployment", "DaemonSet", "StatefulSet"]
-      - apiGroups: ["batch"]
-        kinds: ["Job", "CronJob"]
-  
-  # Policy parameters
-  parameters:
-    excludedContainers:
-      - istio-proxy  # Sidecar injections may have default limits
-
-  # Audit mode: log violations but don't block
-  auditOnly: true
-
----
-# Example: Non-compliant Pod (will be rejected)
-# apiVersion: v1
-# kind: Pod
-# metadata:
-#   name: missing-limits
-# spec:
-#   containers:
-#   - name: app
-#     image: nginx:latest
-#     # No resources defined - VIOLATION
-
----
-# Example: Compliant Pod (will be accepted)
-# apiVersion: v1
-# kind: Pod
-# metadata:
-#   name: compliant-pod
-# spec:
-#   containers:
-#   - name: app
-#     image: nginx:latest
-#     resources:
-#       requests:
-#         cpu: 100m
-#         memory: 128Mi
-#       limits:
-#         cpu: 500m
-#         memory: 512Mi
-
----
-# Notes:
-# 1. All containers MUST have both requests and limits
-# 2. Requests must be less than or equal to limits
-# 3. Memory format: Mi, Gi, M, G (e.g., 128Mi, 1Gi)
-# 4. CPU format: m (millicores), no unit (e.g., 100m, 1)
-# 5. Typical sizing:
-#    - Light workload: requests=100m/128Mi, limits=500m/512Mi
-#    - Medium workload: requests=500m/512Mi, limits=2000m/2Gi
-#    - Heavy workload: requests=1000m/1Gi, limits=4000m/4Gi

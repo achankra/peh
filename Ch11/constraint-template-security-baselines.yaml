@@ -4,7 +4,7 @@
 #   - Read-only root filesystem required
 #   - No dangerous Linux capabilities (SYS_ADMIN)
 
-apiVersion: constraints.gatekeeper.sh/v1beta1
+apiVersion: templates.gatekeeper.sh/v1beta1
 kind: ConstraintTemplate
 metadata:
   name: k8ssecuritybaselines

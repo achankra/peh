@@ -39,9 +39,18 @@ _bw_load_env() {
         # Fall back to Ch01 .env when running from other chapters (peh/Ch03 -> peh/Ch01)
         # shellcheck source=/dev/null
         source "../Ch01/.env"
+    elif [ -f "../Ch1/.env" ]; then
+        # Also check non-zero-padded Ch1 directory
+        # shellcheck source=/dev/null
+        source "../Ch1/.env"
+    elif [ -f "../Ch1/code/.env" ]; then
+        # Manuscript layout: running from ChXX/code/ -> Ch1/code/.env
+        # shellcheck source=/dev/null
+        source "../Ch1/code/.env"
     else
         echo -e "${RED}Error: No .env file found.${NC}"
-        echo "Create one from .env_example in Ch01/ with your Bitwarden credentials."
+        echo "Create .env from .env_example with your Bitwarden credentials."
+        echo "Looked in: .env, ../Ch01/.env, ../Ch1/.env, ../Ch1/code/.env"
         return 1
     fi
 }

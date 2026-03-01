@@ -12,28 +12,32 @@ spec:
     - name: cost-anomalies
       interval: 5m
       rules:
-        # Primary cost anomaly detection (from manuscript)
+        # Primary cost anomaly detection — compares current 1h CPU rate
+        # against the 7-day average using PromQL subquery syntax [7d:1h]
         - alert: CostAnomalyDetected
           expr: |
             abs(
-              rate(container_cost_total[1h]) -
-              avg_over_time(rate(container_cost_total[1h])[7d])
+              sum by (namespace) (rate(container_cpu_usage_seconds_total[1h]))
+              - avg_over_time(sum by (namespace) (rate(container_cpu_usage_seconds_total[1h]))[7d:1h])
             )
             >
-            0.5 * avg_over_time(rate(container_cost_total[1h])[7d])
+            0.5 * avg_over_time(sum by (namespace) (rate(container_cpu_usage_seconds_total[1h]))[7d:1h])
           for: 15m
           labels:
             severity: warning
           annotations:
             summary: "Cost anomaly detected"
             description: >
-              Namespace {{ $labels.namespace }} cost has deviated
-              by more than 50% from baseline
+              Namespace {{ $labels.namespace }} CPU cost has deviated
+              by more than 50% from its 7-day baseline
 
-        # Alert for oversized pod resource requests
+        # Alert for oversized pod resource requests (request/usage ratio > 3x)
         - alert: OversizedPods
           expr: |
-            (kube_pod_container_resource_requests{resource="cpu"} / (rate(container_cpu_usage_seconds_total[5m]) + 0.001)) > 3
+            (
+              kube_pod_container_resource_requests{resource="cpu"}
+              / on(namespace, pod, container) (rate(container_cpu_usage_seconds_total[5m]) + 0.001)
+            ) > 3
           for: 15m
           labels:
             severity: info
@@ -45,27 +49,27 @@ spec:
         # Alert for low node utilization
         - alert: LowNodeUtilization
           expr: |
-            (1 - rate(node_cpu_seconds_total{mode="idle"}[5m])) < 0.2
+            (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) < 0.2
           for: 30m
           labels:
             severity: info
             category: efficiency
           annotations:
             summary: "Node has low CPU utilization"
-            description: "Node {{ $labels.node }} utilization is very low - consider consolidating workloads"
+            description: "Node {{ $labels.instance }} CPU utilization below 20% — consider consolidating workloads"
 
-        # Namespace-level cost anomaly
+        # Namespace-level cost anomaly using subquery syntax
         - alert: NamespaceCostAnomaly
           expr: |
             abs(
-              sum by (namespace) (rate(container_cpu_usage_seconds_total[1h])) -
-              avg_over_time(sum by (namespace) (rate(container_cpu_usage_seconds_total[1h]))[7d])
+              sum by (namespace) (rate(container_cpu_usage_seconds_total[1h]))
+              - avg_over_time(sum by (namespace) (rate(container_cpu_usage_seconds_total[1h]))[7d:1h])
             )
-            > 2 * stddev_over_time(sum by (namespace) (rate(container_cpu_usage_seconds_total[1h]))[7d])
+            > 2 * stddev_over_time(sum by (namespace) (rate(container_cpu_usage_seconds_total[1h]))[7d:1h])
           for: 5m
           labels:
             severity: warning
             category: cost-anomaly
           annotations:
             summary: "Namespace cost anomaly detected"
-            description: "Namespace {{ $labels.namespace }} resource usage deviates significantly from 7-day average"
+            description: "Namespace {{ $labels.namespace }} resource usage deviates by >2 standard deviations from its 7-day average"

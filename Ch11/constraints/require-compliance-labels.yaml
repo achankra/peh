@@ -1,5 +1,5 @@
 apiVersion: constraints.gatekeeper.sh/v1beta1
-kind: K8sRequiredLabels
+kind: K8sRequireLabels
 metadata:
   name: require-compliance-labels
 spec:
@@ -11,9 +11,13 @@ spec:
       - gatekeeper-system
       - kube-system
       - kube-public
+      - flux-system
+      - opencost
+      - monitoring
+      - crossplane-system
+  enforcementAction: dryrun
   parameters:
-    labels:
+    requiredLabels:
       - team
       - cost-center
       - compliance-level
-    exemptImages: []

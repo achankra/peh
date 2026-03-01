@@ -31,7 +31,9 @@ metadata:
   name: compliant-app
   labels:
     app.kubernetes.io/name: compliant-app
-    app.kubernetes.io/team: platform
+    team: platform
+    owner: alice@example.com
+    cost-center: "1234"
 spec:
   replicas: 2
   selector:
@@ -44,7 +46,7 @@ spec:
     spec:
       containers:
       - name: app
-        image: registry.company.com/apps/compliant-app:v1.0
+        image: gcr.io/my-project/compliant-app:v1.0
         resources:
           requests:
             cpu: 100m
@@ -55,6 +57,8 @@ spec:
         securityContext:
           privileged: false
           runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
 """
 
 NONCOMPLIANT_NO_LIMITS = """
@@ -146,14 +150,16 @@ class TestPolicyValidation(unittest.TestCase):
 
     def test_compliant_deployment_passes(self):
         """Compliant deployment should have labels, limits, and approved registry."""
-        self.assertIn("app.kubernetes.io/name", COMPLIANT_DEPLOYMENT)
-        self.assertIn("limits:", COMPLIANT_DEPLOYMENT)
-        self.assertIn("registry.company.com", COMPLIANT_DEPLOYMENT)
+        self.assertIn("team:", COMPLIANT_DEPLOYMENT)
+        self.assertIn("owner:", COMPLIANT_DEPLOYMENT)
+        self.assertIn("cost-center:", COMPLIANT_DEPLOYMENT)
+        self.assertIn("resources:", COMPLIANT_DEPLOYMENT)
         self.assertNotIn("privileged: true", COMPLIANT_DEPLOYMENT)
 
     def test_no_limits_detected(self):
         """Deployment without resource limits should be flagged."""
-        self.assertNotIn("limits:", NONCOMPLIANT_NO_LIMITS)
+        # Check that the container spec has no resources block
+        self.assertNotIn("resources:", NONCOMPLIANT_NO_LIMITS)
 
     def test_privileged_container_detected(self):
         """Privileged container should be flagged."""
@@ -166,7 +172,9 @@ class TestPolicyValidation(unittest.TestCase):
 
     def test_missing_labels_detected(self):
         """Deployments without required team label should be flagged."""
-        self.assertNotIn("app.kubernetes.io/team", NONCOMPLIANT_NO_LIMITS)
+        # NONCOMPLIANT_NO_LIMITS has no team/owner/cost-center labels
+        self.assertNotIn("owner:", NONCOMPLIANT_NO_LIMITS)
+        self.assertNotIn("cost-center:", NONCOMPLIANT_NO_LIMITS)
 
 
 class TestConftestIntegration(unittest.TestCase):

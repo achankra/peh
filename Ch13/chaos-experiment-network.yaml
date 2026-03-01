@@ -1,51 +1,35 @@
-# Network Chaos Experiment Definition
-# Compatible with Chaos Mesh (https://chaos-mesh.org/)
-# Tests system resilience to network degradation
+# Network Chaos Experiments for Chaos Mesh
+# Tests system resilience to network degradation: latency, packet loss, corruption
+#
+# Prerequisites:
+#   1. Chaos Mesh installed
+#   2. Target namespace and workloads exist:
+#      kubectl create namespace chaos-testing
+#      kubectl create deployment demo-app --image=nginx:alpine --replicas=3 -n chaos-testing
 
+---
+# Experiment 1: Network latency injection (100ms delay with jitter)
 apiVersion: chaos-mesh.org/v1alpha1
 kind: NetworkChaos
 metadata:
   name: network-latency-experiment
   namespace: chaos-testing
 spec:
-  # Type of network chaos: delay, loss, duplicate, corrupt
   action: delay
-  
-  # Target pod selection
+  mode: all
+  duration: "2m"
   selector:
     namespaces:
-      - production
+      - chaos-testing
     labelSelectors:
-      app: api-service
-      resilience-test: "true"
-  
-  # Direction of chaos: to (outbound), from (inbound), both
+      app: demo-app
   direction: to
-  
-  # Target nodes (optional)
-  # Only apply chaos to pods on these nodes
-  # leave empty to apply to all nodes
-  targetMode: auto
-  
-  # Latency injection configuration
   delay:
-    # Latency to add (milliseconds)
     latency: "100ms"
-    
-    # Jitter (random variance)
     jitter: "10ms"
-  
-  # Duration of the experiment
-  duration: "10m"
-  
-  # When to start
-  startingDeadlineSeconds: 0
-  
-  # Timeout for chaos operation
-  timeoutSeconds: 60
 
 ---
-# Network Packet Loss Experiment
+# Experiment 2: Packet loss (10% of packets dropped)
 apiVersion: chaos-mesh.org/v1alpha1
 kind: NetworkChaos
 metadata:
@@ -53,62 +37,20 @@ metadata:
   namespace: chaos-testing
 spec:
   action: loss
-  
+  mode: all
+  duration: "2m"
   selector:
     namespaces:
-      - production
+      - chaos-testing
     labelSelectors:
-      app: database
-      tier: backend
-  
-  direction: both
-  
-  # Packet loss configuration
+      app: demo-app
+  direction: to
   loss:
-    # Loss rate as percentage (0-100)
     loss: "10"
-    
-    # Correlation (0-100): probability that the next packet is also lost
     correlation: "25"
-  
-  duration: "5m"
-  startingDeadlineSeconds: 0
 
 ---
-# Network Bandwidth Limit Experiment
-apiVersion: chaos-mesh.org/v1alpha1
-kind: NetworkChaos
-metadata:
-  name: network-bandwidth-limit
-  namespace: chaos-testing
-spec:
-  action: bandwidth
-  
-  selector:
-    namespaces:
-      - production
-    labelSelectors:
-      app: cache-service
-  
-  direction: both
-  
-  # Bandwidth limitation
-  bandwidth:
-    # Rate in bits per second
-    # Examples: 1kbps, 1mbps, 1gbps
-    rate: "10mbps"
-    
-    # Buffer size in bytes
-    limit: 32768
-    
-    # Peak burst size in bytes
-    peakrate: 0
-  
-  duration: "5m"
-  startingDeadlineSeconds: 0
-
----
-# Network Packet Corruption Experiment
+# Experiment 3: Packet corruption (5% of packets corrupted)
 apiVersion: chaos-mesh.org/v1alpha1
 kind: NetworkChaos
 metadata:
@@ -116,28 +58,20 @@ metadata:
   namespace: chaos-testing
 spec:
   action: corrupt
-  
+  mode: all
+  duration: "2m"
   selector:
     namespaces:
-      - production
+      - chaos-testing
     labelSelectors:
-      app: message-broker
-  
+      app: demo-app
   direction: to
-  
-  # Packet corruption configuration
   corrupt:
-    # Corruption rate as percentage (0-100)
     corrupt: "5"
-    
-    # Correlation with previous corruption
     correlation: "10"
-  
-  duration: "3m"
-  startingDeadlineSeconds: 0
 
 ---
-# Network Packet Duplication Experiment
+# Experiment 4: Packet duplication (10% of packets duplicated)
 apiVersion: chaos-mesh.org/v1alpha1
 kind: NetworkChaos
 metadata:
@@ -145,255 +79,39 @@ metadata:
   namespace: chaos-testing
 spec:
   action: duplicate
-  
+  mode: all
+  duration: "2m"
   selector:
     namespaces:
-      - production
+      - chaos-testing
     labelSelectors:
-      app: payment-service
-  
-  direction: both
-  
-  # Packet duplication configuration
+      app: demo-app
+  direction: to
   duplicate:
-    # Duplication rate as percentage
     duplicate: "10"
-    
-    # Correlation with previous duplication
     correlation: "50"
-  
-  duration: "5m"
-  startingDeadlineSeconds: 0
 
 ---
-# Network Chaos with Port Specification
-apiVersion: chaos-mesh.org/v1alpha1
-kind: NetworkChaos
-metadata:
-  name: network-latency-http-only
-  namespace: chaos-testing
-spec:
-  action: delay
-  
-  selector:
-    namespaces:
-      - production
-    labelSelectors:
-      app: api-service
-  
-  direction: both
-  
-  # Protocol specification
-  externalTargets:
-    # Only affect HTTP traffic (port 80/8080)
-    - "0.0.0.0/0:80"
-    - "0.0.0.0/0:8080"
-  
-  delay:
-    latency: "200ms"
-    jitter: "20ms"
-  
-  duration: "10m"
-  startingDeadlineSeconds: 0
-
----
-# Scheduled Network Chaos
+# Schedule: Network latency daily at 3 AM
 apiVersion: chaos-mesh.org/v1alpha1
 kind: Schedule
 metadata:
   name: network-chaos-schedule
   namespace: chaos-testing
 spec:
-  # Schedule frequency (daily at 3 AM)
   schedule: "0 3 * * *"
-  
-  timezone: "UTC"
-  
-  # Type of chaos
   type: NetworkChaos
-  
-  # Enable/disable schedule
-  suspend: false
-  
-  # Concurrency policy
   concurrencyPolicy: Forbid
-  
-  # History limits
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
-  
-  # Network chaos specification
-  networkChaosTemplate:
-    metadata:
-      labels:
-        chaos-test: network
-    spec:
-      action: delay
-      direction: to
-      duration: "5m"
-      startingDeadlineSeconds: 60
-      selector:
-        namespaces:
-          - production
-        labelSelectors:
-          app: api-service
-      delay:
-        latency: "100ms"
-        jitter: "10ms"
-
----
-# Complex Network Experiment Workflow
-apiVersion: chaos-mesh.org/v1alpha1
-kind: Workflow
-metadata:
-  name: network-chaos-workflow
-  namespace: chaos-testing
-spec:
-  entrypoint: network-test-chain
-  parallelism: 1
-  
-  templates:
-    - name: network-test-chain
-      steps:
-        # Step 1: Apply latency
-        - - name: latency-test
-            template: add-latency
-        
-        # Step 2: Apply packet loss
-        - - name: loss-test
-            template: add-loss
-        
-        # Step 3: Apply bandwidth limit
-        - - name: bandwidth-test
-            template: limit-bandwidth
-        
-        # Step 4: Verify recovery
-        - - name: verify-network
-            template: check-connectivity
-    
-    # Latency injection
-    - name: add-latency
-      chaos:
-        networkChaos:
-          action: delay
-          duration: "5m"
-          selector:
-            namespaces:
-              - production
-            labelSelectors:
-              app: api-service
-          direction: to
-          delay:
-            latency: "150ms"
-            jitter: "15ms"
-    
-    # Packet loss
-    - name: add-loss
-      chaos:
-        networkChaos:
-          action: loss
-          duration: "5m"
-          selector:
-            namespaces:
-              - production
-            labelSelectors:
-              app: api-service
-          direction: both
-          loss:
-            loss: "5"
-            correlation: "25"
-    
-    # Bandwidth limitation
-    - name: limit-bandwidth
-      chaos:
-        networkChaos:
-          action: bandwidth
-          duration: "5m"
-          selector:
-            namespaces:
-              - production
-            labelSelectors:
-              app: api-service
-          direction: both
-          bandwidth:
-            rate: "20mbps"
-            limit: 32768
-    
-    # Verify network connectivity
-    - name: check-connectivity
-      statusCheck:
-        duration: "2m"
-        conditions:
-          - type: PodRunning
-            selector:
-              namespaces:
-                - production
-              labelSelectors:
-                app: api-service
-
----
-# Network Chaos Monitoring ConfigMap
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: network-chaos-metrics
-  namespace: chaos-testing
-data:
-  metrics.yaml: |
-    # Key metrics to monitor during network chaos
-    metrics:
-      - name: network_latency
-        query: "histogram_quantile(0.99, rate(request_duration_seconds_bucket[5m]))"
-        threshold: "0.5"  # 500ms max
-      
-      - name: packet_loss
-        query: "rate(network_packets_lost_total[5m])"
-        threshold: "0.01"  # 1% max
-      
-      - name: connection_errors
-        query: "rate(connection_errors_total[5m])"
-        threshold: "0.001"  # 0.1% max
-      
-      - name: throughput
-        query: "rate(network_bytes_transmitted_total[5m])"
-        threshold: "10000000"  # 10MB/s minimum
-  
-  alerts.yaml: |
-    groups:
-    - name: network-chaos-experiment
-      rules:
-      # Alert on severe latency during experiment
-      - alert: NetworkLatencyHigh
-        expr: |
-          histogram_quantile(0.99, rate(request_duration_seconds_bucket[5m])) > 0.5
-        for: 2m
-        labels:
-          severity: warning
-          experiment: network-chaos
-        annotations:
-          summary: "Network latency exceeded threshold"
-          description: "p99 latency: {{ $value | humanizeDuration }}"
-      
-      # Alert on packet loss
-      - alert: NetworkPacketLoss
-        expr: |
-          rate(network_packets_lost_total[5m]) > 0
-        for: 1m
-        labels:
-          severity: warning
-          experiment: network-chaos
-        annotations:
-          summary: "Network packet loss detected"
-          description: "Loss rate: {{ $value | humanizePercentage }}"
-      
-      # Alert on connection failures
-      - alert: NetworkConnectionFailures
-        expr: |
-          rate(connection_errors_total[5m]) > 0.001
-        for: 2m
-        labels:
-          severity: warning
-          experiment: network-chaos
-        annotations:
-          summary: "Network connection failures"
-          description: "Error rate: {{ $value | humanizePercentage }}"
+  networkChaos:
+    action: delay
+    mode: all
+    duration: "5m"
+    selector:
+      namespaces:
+        - chaos-testing
+      labelSelectors:
+        app: demo-app
+    direction: to
+    delay:
+      latency: "100ms"
+      jitter: "10ms"

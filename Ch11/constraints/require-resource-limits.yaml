@@ -1,0 +1,32 @@
+# Constraint instantiates the policy on specific resources
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequireResourceLimits
+metadata:
+  name: require-resource-limits
+spec:
+  # Start in audit mode to avoid blocking deployments immediately
+  # Change to false to enable enforcement
+  match:
+    # Exclude system namespaces
+    excludedNamespaces:
+      - gatekeeper-system
+      - kube-system
+      - kube-public
+      - kube-node-lease
+
+    # Resources to validate
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "DaemonSet", "StatefulSet"]
+      - apiGroups: ["batch"]
+        kinds: ["Job", "CronJob"]
+
+  # Policy parameters
+  parameters:
+    excludedContainers:
+      - istio-proxy  # Sidecar injections may have default limits
+
+  # Audit mode: log violations but don't block
+  enforcementAction: dryrun

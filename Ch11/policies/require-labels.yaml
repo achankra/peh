@@ -13,14 +13,14 @@ metadata:
       - team
       - owner
       - cost-center
-      
+
       Compliant resource:
       metadata:
         labels:
           team: platform
           owner: alice@example.com
           cost-center: "1234"
-      
+
       Non-compliant resource:
       metadata:
         labels:
@@ -48,7 +48,7 @@ spec:
         package k8srequirelabels
 
         # Deny resources missing required labels
-        deny[msg] {
+        violation[{"msg": msg}] {
           label := input.parameters.requiredLabels[_]
           not input.review.object.metadata.labels[label]
           msg := sprintf(
@@ -56,84 +56,3 @@ spec:
             [label, input.parameters.requiredLabels]
           )
         }
-
----
-apiVersion: constraints.gatekeeper.sh/v1beta1
-kind: K8sRequireLabels
-metadata:
-  name: require-labels
-spec:
-  match:
-    excludedNamespaces:
-      - gatekeeper-system
-      - kube-system
-      - kube-public
-    kinds:
-      - apiGroups: ["apps"]
-        kinds: ["Deployment", "DaemonSet", "StatefulSet", "ReplicaSet"]
-      - apiGroups: ["batch"]
-        kinds: ["Job", "CronJob"]
-
-  parameters:
-    requiredLabels:
-      - team        # Team responsible for the application
-      - owner       # Owner's email for escalations
-      - cost-center # Cost center for chargeback
-
-  auditOnly: true
-
----
-# Example: Non-compliant (missing labels)
-# apiVersion: apps/v1
-# kind: Deployment
-# metadata:
-#   name: incomplete-labels
-#   labels:
-#     team: platform
-#     # Missing owner and cost-center - VIOLATION
-# spec:
-#   template:
-#     spec:
-#       containers:
-#       - name: app
-#         image: gcr.io/my-project/myapp:v1.0.0
-
----
-# Example: Compliant (all required labels)
-# apiVersion: apps/v1
-# kind: Deployment
-# metadata:
-#   name: complete-labels
-#   labels:
-#     team: platform
-#     owner: alice@example.com
-#     cost-center: "1234"
-# spec:
-#   template:
-#     spec:
-#       containers:
-#       - name: app
-#         image: gcr.io/my-project/myapp:v1.0.0
-
----
-# Notes:
-# 1. Labels enable:
-#    - Chargeback: Cost allocation by cost-center
-#    - Accountability: Owner for escalations
-#    - Organization: Team-level resource grouping
-# 
-# 2. Label value format guidelines:
-#    - team: lowercase, alphanumeric, max 63 chars
-#    - owner: email address (alice@example.com)
-#    - cost-center: numeric identifier (as string in YAML)
-#
-# 3. Common label patterns:
-#    team: platform, data, security, product
-#    cost-center: department codes (HR, ENG, SALES)
-#    environment: prod, staging, dev (optional)
-#    version: v1, v2 (optional)
-#
-# 4. YAML label rules:
-#    - Keys: alphanumeric, dash, underscore, period (max 63 chars)
-#    - Values: alphanumeric, dash, underscore, period (max 63 chars)
-#    - Must start/end with alphanumeric

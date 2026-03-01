@@ -11,16 +11,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
+
       - name: Build Docker image
         run: docker build -t my-api:${GITHUB_SHA} .
-      
+
       - name: Run tests
         run: make test
-      
+
       - name: Run linters
         run: make lint
-      
+
       - name: Push image (on main)
         if: github.ref == 'refs/heads/main'
         run: |
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
+
       - name: Deploy to Kubernetes
         env:
           KUBECONFIG: ${{ secrets.KUBECONFIG }}

@@ -9,7 +9,7 @@ This chapter addresses one of the most critical challenges in platform engineeri
 - Instrument your platform with cost observability using OpenCost (CNCF)
 - Implement autoscaling with Horizontal Pod Autoscaler (HPA) and Vertical Pod Autoscaler (VPA)
 - Rightsize workloads, leverage spot instances, and use Karpenter for intelligent node selection
-- Set up cost governance guardrails with ResourceQuotas, LimitRanges, and Kyverno policies
+- Set up cost governance guardrails with ResourceQuotas, LimitRanges, and OPA Gatekeeper policies (from Ch11)
 - Implement cost allocation by team and alerting on cost anomalies
 
 ---
@@ -48,7 +48,7 @@ This section maps each file in the code directory to specific chapter sections a
 | File | Section | Purpose |
 |------|---------|---------|
 | `budget-guardrails.yaml` | 12.5 Cost Governance and Alerting | ResourceQuotas and LimitRanges for dev, staging, and production environments. Implements tiered resource budgets to prevent cost overruns and ensure teams operate within their allocations. |
-| `kyverno-require-resources.yaml` | 12.5 Cost Governance and Alerting | **Listing 12.11:** Kyverno ClusterPolicy requiring CPU and memory requests on all pods. Enforces cost observability by preventing "unlimited" resource consumption and enabling accurate HPA operation. |
+| `kyverno-require-resources.yaml` | 12.5 Cost Governance and Alerting | **[SKIP — Not used]** Kyverno ClusterPolicy alternative. This chapter uses OPA Gatekeeper (installed in Ch11) for policy enforcement. The `require-resources` constraint from Ch11 already enforces resource requests/limits. |
 | `cost-alerts.yaml` | 12.5 Cost Governance and Alerting | **Listing 12.8:** PrometheusRule for cost anomaly detection. Detects unusual cost spikes by comparing current rates against 7-day baselines, with configurable thresholds and alert severity. |
 
 ### Installation and Utilities
@@ -122,10 +122,10 @@ Before deploying the code in this chapter, ensure you have the following prerequ
 ### Optional but Recommended
 - **Karpenter**: For intelligent node provisioning and spot instance management
 - **VPA (Vertical Pod Autoscaler)**: For right-sizing recommendations
-- **Kyverno**: For policy-based cost governance and admission control
+- **OPA Gatekeeper**: Already installed from Ch11 — provides policy-based cost governance and admission control
 - **Python 3.8+**: For running analysis and testing scripts (cost-analyzer.py, cost-allocation-labels.py, etc.)
   ```bash
-  pip install pyyaml
+  pip3 install pyyaml
   ```
 
 ---
@@ -168,10 +168,16 @@ chmod +x install-opencost.sh
 kubectl get pods -n opencost
 kubectl logs -n opencost deployment/opencost
 
-# Access OpenCost UI (in another terminal)
+# Access OpenCost UI (in another terminal — port 9090 serves the web UI)
+kubectl port-forward -n opencost svc/opencost 9090:9090
+# Then open http://localhost:9090 in your browser
+
+# Query the cost allocation API (port 9003 serves the REST API, no web UI)
 kubectl port-forward -n opencost svc/opencost 9003:9003
-# Then open http://localhost:9003 in your browser
+curl http://localhost:9003/allocation/compute?window=24h&aggregate=namespace
 ```
+
+> **Note:** OpenCost exposes two ports: **9090** for the web UI and **9003** for the REST API. The UI at `localhost:9003` will not load — use `localhost:9090` for the dashboard and `localhost:9003` only for API queries.
 
 ### Step 3: Apply Cost Allocation Labels to Namespaces
 
@@ -211,13 +217,24 @@ kubectl describe hpa checkout-api-hpa -n team-checkout
 # - Metrics: CPU (70%), Memory (80%)
 ```
 
-### Step 5: Deploy Vertical Pod Autoscaler Configuration (Optional)
+### Step 5: Install and Deploy Vertical Pod Autoscaler (VPA)
+
+VPA is **not included** in Kubernetes by default — you must install it separately:
 
 ```bash
-# Install VPA (requires separate VPA controller installation)
-# See vpa-config.yaml for detailed configuration
+# Clone the autoscaler repo and install VPA components
+git clone https://github.com/kubernetes/autoscaler.git /tmp/autoscaler
+kubectl apply -f /tmp/autoscaler/vertical-pod-autoscaler/deploy/
 
-# For now, we'll use VPA in "Off" mode to get recommendations without automatic updates
+# Verify VPA pods are running (ignore v1beta1 CRD errors — they're harmless)
+kubectl get pods -n kube-system | grep vpa
+# Expected: vpa-admission-controller, vpa-recommender, vpa-updater all Running
+```
+
+Once VPA is installed, apply the checkout-api VPA configuration:
+
+```bash
+# Apply VPA for checkout-api
 kubectl apply -f checkout-api-vpa.yaml
 
 # Verify VPA
@@ -247,20 +264,27 @@ kubectl describe resourcequota -n team-checkout
 # - Default resource requests/limits for containers
 ```
 
-### Step 7: Enforce Cost Governance with Kyverno Policy
+### Step 7: Verify Cost Governance via Gatekeeper (from Ch11)
+
+The `require-resources` and `require-resource-limits` constraints from Ch11 already enforce resource requests/limits on all pods. Verify they're active:
 
 ```bash
-# Apply Kyverno policy requiring resource requests
-kubectl apply -f kyverno-require-resources.yaml
+# Check Gatekeeper constraints are in place
+kubectl get constraints
 
-# Verify policy installation
-kubectl get clusterpolicy require-resource-requests
+# The require-resources constraint audits pods missing resource limits
+kubectl get k8srequiredresources require-resources -o jsonpath='{.status.totalViolations}'
 
-# Test the policy (this should fail without resource requests)
-kubectl run test-pod --image=nginx --dry-run=server -o yaml | kubectl apply -f -
+# Test: a pod without resource requests is flagged (temporarily switch to deny to demonstrate)
+kubectl patch k8srequiredresources require-resources --type merge -p '{"spec":{"enforcementAction":"deny"}}'
+kubectl run test-pod --image=nginx --dry-run=server
+# Expected: admission webhook denied — container must have resource limits
 
-# Expected: Policy violation error if pod has no resource requests
+# Switch back to dryrun
+kubectl patch k8srequiredresources require-resources --type merge -p '{"spec":{"enforcementAction":"dryrun"}}'
 ```
+
+> **Note:** Kyverno (`kyverno-require-resources.yaml`) is provided as an alternative for teams not using Gatekeeper. Since we installed Gatekeeper in Ch11, skip the Kyverno file.
 
 ### Step 8: Set Up Cost Anomaly Detection
 
@@ -490,14 +514,14 @@ Cost optimization then becomes: "What's the cheapest way to meet our SLOs?"
 
 ### 5. Enforce Cost Governance Gradually
 
-- **Start with audit mode**: `validationFailureAction: audit` in Kyverno policies
-- **Review violations**: See what existing workloads would violate the policy
-- **Enforce**: Move to `validationFailureAction: enforce` after teams remediate
+- **Start with audit mode**: `enforcementAction: dryrun` in Gatekeeper constraints (as configured in Ch11)
+- **Review violations**: `kubectl get constraints` shows violation counts per policy
+- **Enforce**: Switch to `enforcementAction: deny` after teams remediate
 
 ### 6. Label Everything for Cost Attribution
 
 - **Required labels**: `team`, `cost-center`, `environment` (used for chargeback/showback)
-- **Enforce via admission control**: Kyverno policy prevents unlabeled workloads
+- **Enforce via admission control**: Gatekeeper constraints (from Ch11) prevent unlabeled workloads
 - **Review monthly**: Generate team reports showing their cost and trends
 
 ### 7. Monitor Anomalies Continuously
@@ -670,6 +694,33 @@ kubectl get events -n team-checkout --sort-by='.lastTimestamp' | grep -i scaling
 # Or exclude scheduled scaling events by time of day
 ```
 
+### Namespace Deletion Hangs (Terminating State)
+
+**Symptom**: `kubectl delete -f cost-labeling-examples.yaml` hangs and namespaces stay in `Terminating` state
+
+**Root Cause**: A stale metrics-server API registration blocks namespace garbage collection. The namespace controller cannot enumerate all API groups, so it refuses to finalize.
+
+```bash
+# 1. Check for stale API services
+kubectl get apiservice | grep -i metrics
+# If it shows "False" under AVAILABLE, that's the problem
+
+# 2. Delete the stale API service
+kubectl delete apiservice v1beta1.metrics.k8s.io
+
+# 3. If namespaces are still stuck, force-delete them
+for ns in team-checkout team-analytics; do
+  kubectl get ns $ns -o json 2>/dev/null | \
+    sed 's/"finalizers": \[.*\]/"finalizers": []/' | \
+    kubectl replace --raw "/api/v1/namespaces/$ns/finalize" -f - 2>/dev/null
+done
+
+# 4. Verify they're gone
+kubectl get ns | grep team-
+```
+
+> **Tip:** Delete HPA, VPA, and Helm releases (e.g., `helm uninstall opencost -n opencost`) **before** deleting namespaces to avoid orphaned finalizers.
+
 ### Spot Instance Pods Being Evicted Immediately
 
 **Symptom**: Pods scheduled on spot nodes are evicted after seconds/minutes
@@ -702,7 +753,7 @@ kubectl get pod -n team-checkout <pod-name> -o yaml | grep terminationGracePerio
 - **Kubernetes HPA**: https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/
 - **Kubernetes VPA**: https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler
 - **Karpenter**: https://karpenter.sh/docs/
-- **Kyverno**: https://kyverno.io/docs/
+- **OPA Gatekeeper**: https://open-policy-agent.github.io/gatekeeper/website/docs/
 
 ### FinOps Resources
 - **FinOps Foundation**: https://www.finops.org/
@@ -727,7 +778,8 @@ kubectl describe nodes | grep -A 5 "Allocated resources"
 kubectl get pods --all-namespaces -o json | jq '.items[] | {name: .metadata.name, namespace: .metadata.namespace, requests: .spec.containers[].resources.requests}'
 
 # Monitor cost allocation (if OpenCost installed)
-kubectl port-forward -n opencost svc/opencost 9003:9003
+kubectl port-forward -n opencost svc/opencost 9090:9090   # Web UI at http://localhost:9090
+kubectl port-forward -n opencost svc/opencost 9003:9003   # API at http://localhost:9003
 # Then: curl http://localhost:9003/allocation/compute?window=24h&aggregate=namespace
 ```
 

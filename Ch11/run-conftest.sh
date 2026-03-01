@@ -32,8 +32,7 @@ MANIFEST_PATH="${1:-.}"
 STRICT_MODE="${2:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Policy directories
-POLICY_DIR="${SCRIPT_DIR}/policies"
+# Policy directories (only conftest-tests/ — policies/ contains Gatekeeper YAML, not standalone Rego)
 CONFTEST_POLICY_DIR="${SCRIPT_DIR}/conftest-tests"
 
 # Check if conftest is installed
@@ -44,9 +43,9 @@ if ! command -v conftest &> /dev/null; then
 fi
 
 # Check if policy directory exists
-if [ ! -d "$POLICY_DIR" ] && [ ! -d "$CONFTEST_POLICY_DIR" ]; then
-    echo -e "${RED}ERROR: Policy directories not found${NC}"
-    echo "Expected: $POLICY_DIR or $CONFTEST_POLICY_DIR"
+if [ ! -d "$CONFTEST_POLICY_DIR" ]; then
+    echo -e "${RED}ERROR: Policy directory not found${NC}"
+    echo "Expected: $CONFTEST_POLICY_DIR"
     exit 1
 fi
 
@@ -92,12 +91,7 @@ run_validation() {
     local policy_opts=""
 
     # Build policy options
-    if [ -d "$POLICY_DIR" ]; then
-        policy_opts="-p $POLICY_DIR"
-    fi
-    if [ -d "$CONFTEST_POLICY_DIR" ]; then
-        policy_opts="$policy_opts -p $CONFTEST_POLICY_DIR"
-    fi
+    policy_opts="-p $CONFTEST_POLICY_DIR"
 
     # Run conftest
     echo "Testing: $manifest"
@@ -117,8 +111,7 @@ main() {
 
     echo "Script directory: $SCRIPT_DIR"
     echo "Manifest path: $MANIFEST_PATH"
-    echo "Policy directory: $POLICY_DIR"
-    echo "Conftest policy directory: $CONFTEST_POLICY_DIR"
+    echo "Policy directory: $CONFTEST_POLICY_DIR"
     echo ""
 
     # Find all manifests

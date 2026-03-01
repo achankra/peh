@@ -208,12 +208,12 @@ services:
     image: ghcr.io/chroma-core/chroma:latest
     ports:
       - "8000:8000"
-  
+
   prometheus:
     image: prom/prometheus:latest
     volumes:
       - ./ai-governance-alerts.yaml:/etc/prometheus/rules.yml
-  
+
   ai-platform:
     build: .
     environment:

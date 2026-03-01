@@ -1,148 +1,102 @@
+# Chaos Mesh Pod Failure Experiments
+# Demonstrates pod-kill chaos to test self-healing (restarts, HPA, PDB)
+#
+# Prerequisites:
+#   1. Chaos Mesh installed: helm install chaos-mesh chaos-mesh/chaos-mesh -n chaos-mesh
+#   2. Target namespace and workloads exist (see setup below)
+#
+# Setup target workloads:
+#   kubectl create namespace chaos-testing
+#   kubectl create deployment demo-app --image=nginx:alpine --replicas=3 -n chaos-testing
+#   kubectl wait --for=condition=available deployment/demo-app -n chaos-testing --timeout=60s
+
+---
+# Experiment 1: Kill a single pod
 apiVersion: chaos-mesh.org/v1alpha1
 kind: PodChaos
 metadata:
-  name: pod-failure-demo
+  name: pod-kill-single
   namespace: chaos-testing
 spec:
-  # Action type: kill the pod
   action: pod-kill
-  
-  # Duration of the chaos experiment
-  duration: 30s
-  
-  # Selector for target pods
-  selector:
-    # Target specific namespace
-    namespaces:
-      - team-alpha
-    
-    # Match pods by label
-    labelSelectors:
-      app: demo-app
-      version: v1
-  
-  # Mode of failure
   mode: one
-  
-  # Value depends on mode:
-  # - mode: one → value is ignored
-  # - mode: all → affects all matching pods
-  # - mode: fixed → value is number of pods
-  # - mode: fixed-percent → value is percentage
-  
-  # Recovery policy
-  scheduler:
-    cron: "@hourly"
+  duration: "30s"
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      app: demo-app
 
 ---
+# Experiment 2: Kill 50% of pods
 apiVersion: chaos-mesh.org/v1alpha1
 kind: PodChaos
 metadata:
-  name: pod-failure-multiple
+  name: pod-kill-percentage
   namespace: chaos-testing
 spec:
-  # Action type
   action: pod-kill
-  
-  # Duration
-  duration: 1m
-  
-  # Selector for target pods
-  selector:
-    namespaces:
-      - team-alpha
-      - team-beta
-    
-    labelSelectors:
-      app: demo-app
-  
-  # Affect multiple pods (25% of matching pods)
   mode: fixed-percent
-  value: "25"
-  
-  # Graceful period before pod termination
-  gracePeriod: 5
-
----
-apiVersion: chaos-mesh.org/v1alpha1
-kind: PodChaos
-metadata:
-  name: pod-failure-all-replicas
-  namespace: chaos-testing
-spec:
-  # Action type
-  action: pod-kill
-  
-  # Duration
-  duration: 45s
-  
-  # Selector
+  value: "50"
+  duration: "1m"
   selector:
     namespaces:
-      - team-alpha
-    
+      - chaos-testing
     labelSelectors:
       app: demo-app
-  
-  # Affect all matching pods
-  mode: all
-  
-  # Graceful period
-  gracePeriod: 10
 
 ---
+# Experiment 3: Kill a specific container (not the whole pod)
 apiVersion: chaos-mesh.org/v1alpha1
 kind: PodChaos
 metadata:
   name: container-kill-experiment
   namespace: chaos-testing
 spec:
-  # Kill specific container instead of pod
   action: container-kill
-  
-  # Duration
-  duration: 30s
-  
-  # Selector
+  mode: one
+  duration: "30s"
+  containerNames:
+    - nginx
   selector:
     namespaces:
-      - team-alpha
-    
+      - chaos-testing
     labelSelectors:
       app: demo-app
-  
-  # Container name to kill
-  containerNames:
-    - app
-  
-  # Mode
-  mode: one
-  
-  # Graceful period
-  gracePeriod: 0
 
 ---
+# Experiment 4: Pod failure (makes pod unavailable without killing it)
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pod-failure-experiment
+  namespace: chaos-testing
+spec:
+  action: pod-failure
+  mode: one
+  duration: "30s"
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      app: demo-app
+
+---
+# Schedule: Repeat pod-kill every 5 minutes
 apiVersion: chaos-mesh.org/v1alpha1
 kind: Schedule
 metadata:
-  name: pod-failure-schedule
+  name: pod-kill-schedule
   namespace: chaos-testing
 spec:
-  schedule: "*/5 * * * *"  # Every 5 minutes
-  
-  chaosSpec:
-    apiVersion: chaos-mesh.org/v1alpha1
-    kind: PodChaos
-    metadata:
-      name: pod-failure-scheduled
-    spec:
-      action: pod-kill
-      duration: 30s
-      selector:
-        namespaces:
-          - team-alpha
-        labelSelectors:
-          app: demo-app
-      mode: fixed-percent
-      value: "10"
-      gracePeriod: 5
+  schedule: "*/5 * * * *"
+  type: PodChaos
+  podChaos:
+    action: pod-kill
+    mode: one
+    duration: "30s"
+    selector:
+      namespaces:
+        - chaos-testing
+      labelSelectors:
+        app: demo-app

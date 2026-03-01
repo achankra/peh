@@ -12,7 +12,7 @@ metadata:
 spec:
   owner: platform-team
   type: service
-  
+
   parameters:
     - title: Service Information
       required:
@@ -27,18 +27,18 @@ spec:
           pattern: "^[a-z][a-z0-9-]*[a-z0-9]$"
           minLength: 3
           maxLength: 30
-        
+
         ownerName:
           title: Owner Name
           type: string
           description: Team or person responsible for the service
-        
+
         ownerEmail:
           title: Owner Email
           type: string
           format: email
           description: Contact email for the service owner
-    
+
     - title: Technology Stack
       required:
         - language
@@ -54,7 +54,7 @@ spec:
             - rust
           default: go
           description: Primary language for the service
-        
+
         framework:
           title: Framework
           type: string
@@ -67,7 +67,7 @@ spec:
             - express
             - actix
           description: Web framework to use
-    
+
     - title: Infrastructure
       required:
         - database
@@ -84,7 +84,7 @@ spec:
             - none
           default: postgresql
           description: Primary database for the service
-        
+
         cacheLayer:
           title: Cache Layer
           type: string
@@ -94,7 +94,7 @@ spec:
             - none
           default: redis
           description: In-memory cache solution
-        
+
         messageQueue:
           title: Message Queue
           type: string
@@ -104,7 +104,7 @@ spec:
             - aws-sqs
             - none
           default: none
-    
+
     - title: Deployment Configuration
       properties:
         replicas:
@@ -113,7 +113,7 @@ spec:
           default: 3
           minimum: 1
           maximum: 10
-        
+
         environment:
           title: Environment
           type: string
@@ -122,17 +122,17 @@ spec:
             - staging
             - production
           default: staging
-        
+
         enableMonitoring:
           title: Enable Prometheus Monitoring
           type: boolean
           default: true
-        
+
         enableTracing:
           title: Enable Distributed Tracing
           type: boolean
           default: true
-  
+
   steps:
     # Step 1: Generate deployment YAML using AI
     - id: generate-deployment
@@ -152,7 +152,7 @@ spec:
           cacheLayer: ${{ parameters.cacheLayer }}
           monitoring: ${{ parameters.enableMonitoring }}
           owner: ${{ parameters.ownerName }}
-    
+
     # Step 2: Generate service configuration using AI
     - id: generate-service-config
       name: Generate Service Configuration
@@ -167,7 +167,7 @@ spec:
           language: ${{ parameters.language }}
           database: ${{ parameters.database }}
           environment: ${{ parameters.environment }}
-    
+
     # Step 3: Generate monitoring configuration using AI
     - id: generate-monitoring-config
       name: Generate Monitoring Config
@@ -184,7 +184,7 @@ spec:
           slos:
             availability: 99.9
             latency_p99_ms: 500
-    
+
     # Step 4: Generate tracing configuration using AI
     - id: generate-tracing-config
       name: Generate Tracing Config
@@ -199,7 +199,7 @@ spec:
           serviceName: ${{ parameters.serviceName }}
           language: ${{ parameters.language }}
           tracingBackend: jaeger
-    
+
     # Step 5: Create Git repository
     - id: publish
       name: Publish Repository
@@ -212,7 +212,7 @@ spec:
         token: ${{ secrets.GITHUB_TOKEN }}
         gitAuthorName: "AI Scaffolder"
         gitAuthorEmail: "scaffolder@platform.local"
-    
+
     # Step 6: Create Kubernetes namespace
     - id: create-namespace
       name: Create Kubernetes Namespace
@@ -228,7 +228,7 @@ spec:
             team: "${{ parameters.ownerName }}"
             environment: "${{ parameters.environment }}"
             ai-generated: "true"
-    
+
     # Step 7: Deploy to Kubernetes
     - id: deploy-kubernetes
       name: Deploy to Kubernetes
@@ -244,7 +244,7 @@ spec:
           service: ${{ steps['generate-service-config'].output.service }}
           monitoring: ${{ steps['generate-monitoring-config'].output.monitoring }}
           tracing: ${{ steps['generate-tracing-config'].output.tracing }}
-    
+
     # Step 8: Register in Backstage catalog
     - id: register-catalog
       name: Register in Backstage Catalog
@@ -252,7 +252,7 @@ spec:
       input:
         repoContentsUrl: ${{ steps['publish'].output.repoContentsUrl }}
         catalogInfoPath: /catalog-info.yaml
-  
+
   # Output information for the user
   output:
     links:
@@ -262,23 +262,23 @@ spec:
         url: "https://k8s-dashboard.example.com/namespaces/${{ parameters.serviceName }}"
       - title: Source Code
         url: ${{ steps['publish'].output.repoContentsUrl }}
-    
+
     text:
       - title: Service Created Successfully
         content: |
           Your Kubernetes microservice **${{ parameters.serviceName }}** has been created!
-          
+
           Next steps:
           1. Clone the repository: `git clone ${{ steps['publish'].output.remoteUrl }}`
           2. Review the generated Kubernetes manifests
           3. Customize configurations as needed
           4. Commit and push to trigger CI/CD pipeline
           5. Monitor deployment in your dashboard
-          
+
           AI-Generated Configurations:
           - Deployment with ${{ parameters.replicas }} replicas
           - Service configuration for ${{ parameters.framework }}
           - Monitoring dashboards and alerts (Prometheus)
           - Distributed tracing configuration (Jaeger)
-          
+
           Owner: ${{ parameters.ownerName }} (${{ parameters.ownerEmail }})

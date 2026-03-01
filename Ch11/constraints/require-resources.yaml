@@ -13,5 +13,10 @@ spec:
       - kube-system
       - kube-public
       - gatekeeper-system
+      - flux-system
+      - opencost
+      - monitoring
+      - crossplane-system
+  enforcementAction: dryrun
   parameters:
     message: "All containers must have resource requests and limits"

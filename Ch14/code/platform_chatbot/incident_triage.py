@@ -59,15 +59,15 @@ class IncidentAnalysis:
 class IncidentTriageAgent:
     """
     Intelligent incident triage and root cause analysis agent.
-    
+
     Correlates multiple signal types to rapidly identify root causes
     and recommend remediation steps.
     """
-    
+
     def __init__(self, mock_mode: bool = False):
         """
         Initialize incident triage agent.
-        
+
         Args:
             mock_mode: If True, use mock data instead of real systems
         """
@@ -75,7 +75,7 @@ class IncidentTriageAgent:
         self.llm = self._init_llm()
         self.incident_patterns = self._load_incident_patterns()
         self.runbook_index = self._load_runbooks()
-        
+
     def _init_llm(self):
         """Initialize language model."""
         if not self.mock_mode:
@@ -89,7 +89,7 @@ class IncidentTriageAgent:
                 logger.warning(f"Failed to initialize OpenAI: {e}. Using mock mode.")
                 return MockLLM()
         return MockLLM()
-    
+
     def _load_incident_patterns(self) -> Dict:
         """Load known incident patterns for correlation."""
         return {
@@ -124,7 +124,7 @@ class IncidentTriageAgent:
                 "resolution": "Check DNS server status, verify configuration"
             }
         }
-    
+
     def _load_runbooks(self) -> Dict:
         """Load runbook templates for common issues."""
         return {
@@ -172,42 +172,42 @@ class IncidentTriageAgent:
                 ]
             }
         }
-    
+
     def triage(self, incident_data: Dict) -> IncidentAnalysis:
         """
         Perform incident triage and analysis.
-        
+
         Args:
             incident_data: Dict with 'alert', 'severity', 'timestamp', 'signals'
-        
+
         Returns:
             IncidentAnalysis with root cause and recommendations
         """
         incident_id = self._generate_incident_id(incident_data)
-        
+
         # Parse incident data
         signals = self._collect_signals(incident_data)
-        
+
         # Correlate signals
         correlated_signals, patterns_matched = self._correlate_signals(signals)
-        
+
         # Identify affected components
         affected_components = self._identify_components(signals)
-        
+
         # Generate root cause analysis
         root_cause, confidence = self._analyze_root_cause(
             signals, patterns_matched, incident_data
         )
-        
+
         # Build timeline
         timeline = self._build_timeline(signals)
-        
+
         # Recommend runbook steps
         runbook_steps = self._get_runbook_steps(affected_components, root_cause)
-        
+
         # Estimate impact
         impact = self._estimate_impact(signals, incident_data)
-        
+
         analysis = IncidentAnalysis(
             incident_id=incident_id,
             title=incident_data.get("alert", "Unknown Incident"),
@@ -220,20 +220,20 @@ class IncidentTriageAgent:
             runbook_steps=runbook_steps,
             estimated_impact=impact
         )
-        
+
         logger.info(f"Incident {incident_id} triaged: {root_cause} (confidence: {confidence})")
         return analysis
-    
+
     def _generate_incident_id(self, incident_data: Dict) -> str:
         """Generate unique incident ID."""
         content = f"{incident_data.get('timestamp', '')}{incident_data.get('alert', '')}"
         hash_val = hashlib.md5(content.encode()).hexdigest()[:8]
         return f"INC-{hash_val.upper()}"
-    
+
     def _collect_signals(self, incident_data: Dict) -> List[SignalData]:
         """Collect and parse signals from incident data."""
         signals = []
-        
+
         # Parse provided signals
         for signal_dict in incident_data.get("signals", []):
             signals.append(SignalData(
@@ -244,7 +244,7 @@ class IncidentTriageAgent:
                 source=signal_dict.get("source", "unknown"),
                 details=signal_dict.get("details", {})
             ))
-        
+
         # If no signals provided, generate from alert
         if not signals and incident_data.get("alert"):
             signals.append(SignalData(
@@ -255,52 +255,52 @@ class IncidentTriageAgent:
                 source="alert_system",
                 details={"alert_message": incident_data.get("alert")}
             ))
-        
+
         return signals
-    
+
     def _correlate_signals(self, signals: List[SignalData]) -> Tuple[List[SignalData], List[str]]:
         """
         Correlate signals to identify patterns.
-        
+
         Returns:
             Tuple of (correlated_signals, matched_pattern_names)
         """
         patterns_matched = []
-        
+
         # Check against known patterns
         signal_types = {s.signal_type for s in signals}
         for pattern_name, pattern in self.incident_patterns.items():
             pattern_signals = set(pattern["signals"])
             if pattern_signals.issubset(signal_types):
                 patterns_matched.append(pattern_name)
-        
+
         # Time-based correlation (signals within 5 minutes)
         if signals:
             signals_sorted = sorted(signals, key=lambda s: s.timestamp)
             time_correlations = []
-            
+
             for i, sig in enumerate(signals_sorted):
                 sig_time = datetime.fromisoformat(sig.timestamp)
                 related = [sig]
-                
+
                 for other_sig in signals_sorted[i+1:]:
                     other_time = datetime.fromisoformat(other_sig.timestamp)
                     time_diff = abs((other_time - sig_time).total_seconds())
                     if time_diff < 300:  # 5 minutes
                         related.append(other_sig)
-                
+
                 if len(related) > 1:
                     time_correlations.extend(related)
-        
+
         return signals, patterns_matched
-    
+
     def _identify_components(self, signals: List[SignalData]) -> List[str]:
         """Identify affected components from signals."""
         components = set()
-        
+
         for signal in signals:
             source = signal.source.lower()
-            
+
             if any(x in source for x in ["db", "database", "postgres", "mysql"]):
                 components.add("database")
             if any(x in source for x in ["api", "gateway", "http", "endpoint"]):
@@ -315,9 +315,9 @@ class IncidentTriageAgent:
                 components.add("cache")
             if any(x in source for x in ["queue", "kafka", "rabbitmq", "sqs"]):
                 components.add("message_queue")
-        
+
         return sorted(list(components))
-    
+
     def _analyze_root_cause(
         self,
         signals: List[SignalData],
@@ -326,7 +326,7 @@ class IncidentTriageAgent:
     ) -> Tuple[str, float]:
         """
         Analyze root cause using LLM and pattern matching.
-        
+
         Returns:
             Tuple of (root_cause_text, confidence_score)
         """
@@ -339,14 +339,14 @@ class IncidentTriageAgent:
         else:
             confidence = 0.6
             root_cause = "Unknown - pattern matching found no matches"
-        
+
         # Use LLM for detailed analysis
         if not self.mock_mode and self.llm:
             signal_summary = "\n".join([
                 f"- {s.signal_type}: {s.severity} at {s.timestamp}"
                 for s in signals[:5]
             ])
-            
+
             prompt = f"""Given these incident signals, what is the root cause?
 
 Signals:
@@ -355,7 +355,7 @@ Signals:
 Alert: {incident_data.get('alert', 'Unknown')}
 
 Provide a concise root cause and remediation steps."""
-            
+
             try:
                 response = self.llm.invoke(prompt)
                 if hasattr(response, 'content'):
@@ -365,31 +365,31 @@ Provide a concise root cause and remediation steps."""
                 confidence = 0.75
             except Exception as e:
                 logger.warning(f"LLM analysis failed: {e}")
-        
+
         return root_cause, confidence
-    
+
     def _build_timeline(self, signals: List[SignalData]) -> List[str]:
         """Build incident timeline from signals."""
         timeline = []
-        
+
         signals_sorted = sorted(signals, key=lambda s: s.timestamp)
-        
+
         for signal in signals_sorted:
             time_str = signal.timestamp
             summary = f"{signal.signal_type.upper()}: {signal.details.get('message', signal.severity)}"
             timeline.append(f"{time_str} - {summary}")
-        
+
         return timeline
-    
+
     def _get_runbook_steps(self, components: List[str], root_cause: str) -> List[str]:
         """Get recommended runbook steps for affected components."""
         steps = []
-        
+
         # Add header
         steps.append("INCIDENT REMEDIATION STEPS")
         steps.append("=" * 50)
         steps.append("")
-        
+
         # Add component-specific steps
         for component in components:
             if component in self.runbook_index:
@@ -397,7 +397,7 @@ Provide a concise root cause and remediation steps."""
                 steps.append(f"## {runbook['title']}")
                 steps.extend(runbook['steps'])
                 steps.append("")
-        
+
         # Add generic steps if no specific runbook
         if not components:
             steps.extend([
@@ -407,9 +407,9 @@ Provide a concise root cause and remediation steps."""
                 "4. Check recent deployments: kubectl rollout history",
                 "5. Escalate to on-call engineer if issue persists"
             ])
-        
+
         return steps
-    
+
     def _estimate_impact(self, signals: List[SignalData], incident_data: Dict) -> Dict:
         """Estimate incident impact on users and services."""
         severity = incident_data.get("severity", "medium")
@@ -419,24 +419,24 @@ Provide a concise root cause and remediation steps."""
             "high": 0.8,
             "critical": 1.0
         }.get(severity, 0.5)
-        
+
         # Estimate affected users (mock calculation)
         estimated_users = int(1000 * severity_multiplier * len(signals))
-        
+
         # Estimate duration
         duration_minutes = 30 if severity == "critical" else 60
-        
+
         return {
             "estimated_affected_users": estimated_users,
             "estimated_duration_minutes": duration_minutes,
             "estimated_revenue_impact_usd": estimated_users * 0.01 * duration_minutes,
             "severity_level": severity
         }
-    
+
     def batch_triage(self, incidents: List[Dict]) -> List[IncidentAnalysis]:
         """Triage multiple incidents."""
         return [self.triage(incident) for incident in incidents]
-    
+
     def to_slack_message(self, analysis: IncidentAnalysis) -> Dict:
         """Format incident analysis as Slack message."""
         return {
@@ -486,7 +486,7 @@ Provide a concise root cause and remediation steps."""
 
 class MockLLM:
     """Mock LLM for testing without OpenAI."""
-    
+
     def invoke(self, prompt: str) -> str:
         """Return mock response."""
         if "database" in prompt.lower():
@@ -499,7 +499,7 @@ class MockLLM:
 if __name__ == "__main__":
     # Example usage
     agent = IncidentTriageAgent()
-    
+
     incident = {
         "alert": "High error rate on payment service",
         "severity": "critical",
@@ -523,9 +523,9 @@ if __name__ == "__main__":
             }
         ]
     }
-    
+
     analysis = agent.triage(incident)
-    
+
     print(f"Incident ID: {analysis.incident_id}")
     print(f"Root Cause: {analysis.root_cause}")
     print(f"Confidence: {analysis.confidence_score:.0%}")

@@ -7,7 +7,7 @@ Queries OPA Gatekeeper audit results and exposes them as Prometheus metrics.
 Enables monitoring of policy violations in real-time dashboards and alerting.
 
 Usage:
-    python gatekeeper_exporter.py [--port 8000] [--interval 30]
+    python3 gatekeeper_exporter.py [--port 8000] [--interval 30]
 
 Arguments:
     --port PORT          Port for metrics HTTP server (default: 8000)
@@ -18,7 +18,7 @@ Arguments:
 Prerequisites:
     - kubectl configured with cluster access
     - OPA Gatekeeper installed (see gatekeeper-install.yaml)
-    - prometheus_client library: pip install prometheus_client
+    - prometheus_client library: pip3 install prometheus_client
     - Python 3.7+
 
 Metrics Exposed:

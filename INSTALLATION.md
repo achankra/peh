@@ -464,12 +464,12 @@ brew install pre-commit
 
 **Linux (Ubuntu/Debian):**
 ```bash
-pip install pre-commit --break-system-packages
+pip3 install pre-commit --break-system-packages
 ```
 
 **Windows:**
 ```powershell
-pip install pre-commit
+pip3 install pre-commit
 ```
 
 **Verify installation:**
@@ -488,7 +488,7 @@ pre-commit --version
 Install the Python testing tools in a virtual environment or globally:
 
 ```bash
-pip install pytest pytest-cov pyyaml
+pip3 install pytest pytest-cov pyyaml
 # On Linux, add --break-system-packages if installing globally
 ```
 
@@ -756,7 +756,7 @@ helm install loki grafana/loki-stack \
 Install the Python OpenTelemetry SDK and exporters:
 
 ```bash
-pip install opentelemetry-api opentelemetry-sdk \
+pip3 install opentelemetry-api opentelemetry-sdk \
   opentelemetry-exporter-otlp \
   opentelemetry-exporter-prometheus \
   prometheus-client flask
@@ -824,7 +824,7 @@ kubectl get pods -n argocd
 #### Python Demo Application Dependencies
 
 ```bash
-pip install flask pyyaml
+pip3 install flask pyyaml
 # On Linux, add --break-system-packages if installing globally
 ```
 
@@ -890,7 +890,7 @@ Chapter 7 uses a dual-stack approach: the primary onboarding API is a Python/Fla
 
 **Python Onboarding API Dependencies:**
 ```bash
-pip install flask pyyaml kubernetes
+pip3 install flask pyyaml kubernetes
 # On Linux, add --break-system-packages if installing globally
 ```
 
@@ -953,7 +953,7 @@ trivy --version
 
 **Python Dependencies:**
 ```bash
-pip install pyyaml requests pytest
+pip3 install pyyaml requests pytest
 # On Linux, add --break-system-packages if installing globally
 ```
 
@@ -1011,7 +1011,7 @@ kubectl get pods -n crossplane-system
 
 **Python Dependencies:**
 ```bash
-pip install flask pyyaml kubernetes
+pip3 install flask pyyaml kubernetes
 # On Linux, add --break-system-packages if installing globally
 ```
 
@@ -1070,7 +1070,7 @@ renovate --version  # Only needed for self-hosted option
 
 **Python Dependencies:**
 ```bash
-pip install pyyaml requests pytest
+pip3 install pyyaml requests pytest
 # On Linux, add --break-system-packages if installing globally
 ```
 
@@ -1155,7 +1155,7 @@ opa version
 
 **Python Dependencies:**
 ```bash
-pip install prometheus-client kubernetes pyyaml
+pip3 install prometheus-client kubernetes pyyaml
 # On Linux, add --break-system-packages if installing globally
 ```
 
@@ -1168,7 +1168,6 @@ pip install prometheus-client kubernetes pyyaml
 | OpenCost | ≥1.108 | CNCF Kubernetes cost allocation (open-source) |
 | Karpenter | ≥0.33 | Kubernetes-native node autoscaling and instance selection |
 | VPA | Latest | Vertical Pod Autoscaler for rightsizing |
-| Kyverno | ≥1.11 | Kubernetes policy engine for cost governance |
 | Metrics Server | Latest | Cluster resource metrics for HPA/VPA |
 
 > **Note:** HPA (Horizontal Pod Autoscaler) is built into every standard Kubernetes cluster and does not require separate installation. You only need the Metrics Server so HPA has data to work with.
@@ -1183,14 +1182,21 @@ helm repo add opencost https://opencost.github.io/opencost-helm-chart
 helm repo update
 helm install opencost opencost/opencost \
   --namespace opencost --create-namespace \
-  --set opencost.prometheus.internal.serviceName="prometheus-server" \
-  --set opencost.prometheus.internal.namespaceName="monitoring"
+  --set opencost.prometheus.internal.serviceName="monitoring-kube-prometheus-prometheus" \
+  --set opencost.prometheus.internal.namespaceName="monitoring" \
+  --set opencost.prometheus.internal.port=9090 \
+  --set opencost.ui.enabled=true \
+  --set opencost.exporter.defaultClusterId="platform-cluster"
 ```
 
 **Verify installation:**
 ```bash
 kubectl get pods -n opencost
-kubectl port-forward -n opencost svc/opencost 9003:9003  # Access UI
+# Web UI (port 9090) — open http://localhost:9090
+kubectl port-forward -n opencost svc/opencost 9090:9090
+# REST API (port 9003) — no web UI on this port
+kubectl port-forward -n opencost svc/opencost 9003:9003
+curl http://localhost:9003/allocation/compute?window=24h&aggregate=namespace
 ```
 
 > [!WARNING]
@@ -1222,39 +1228,15 @@ kubectl get pods -n karpenter
 > - Not setting resource limits on NodePools can lead to runaway scaling and unexpected cloud bills.
 > - Karpenter does not work on Kind or local clusters; the exercises for Karpenter require an actual EKS cluster.
 
-#### Kyverno
-
-Kubernetes-native policy engine for cost governance policies.
-
-**All platforms (Helm is cross-platform):**
-```bash
-helm repo add kyverno https://kyverno.github.io/kyverno/
-helm repo update
-helm install kyverno kyverno/kyverno \
-  --namespace kyverno --create-namespace
-```
-
-**Verify installation:**
-```bash
-kubectl get pods -n kyverno
-```
-
-> [!WARNING]
-> **Common pitfalls to watch out for**
-> - Running both Kyverno and OPA Gatekeeper on the same cluster without careful policy partitioning causes duplicate or conflicting enforcement.
-> - Kyverno mutate policies that modify resource requests can interfere with VPA recommendations.
-> - Not using audit mode first means blocking policies can reject workloads that were already running.
-
 #### Vertical Pod Autoscaler (VPA)
 
 VPA is not included in standard Kubernetes and must be installed separately. It provides resource request recommendations.
 
 **All platforms (requires kubectl access to cluster):**
 ```bash
-git clone https://github.com/kubernetes/autoscaler.git
-cd autoscaler/vertical-pod-autoscaler
-./hack/vpa-up.sh  # Linux/macOS
-# On Windows, run from Git Bash or WSL
+git clone https://github.com/kubernetes/autoscaler.git /tmp/autoscaler
+kubectl apply -f /tmp/autoscaler/vertical-pod-autoscaler/deploy/
+# Ignore v1beta1 CRD errors — they are harmless (old API versions)
 ```
 
 **Verify installation:**
@@ -1274,7 +1256,9 @@ Required for HPA and VPA functionality:
 
 ```bash
 kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
-# For Kind clusters, you may need to add --kubelet-insecure-tls flag
+# For Kind clusters, patch the deployment to skip TLS verification:
+kubectl patch deployment metrics-server -n kube-system \
+  --type='json' -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 ```
 
 > [!WARNING]
@@ -1292,25 +1276,55 @@ kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/late
 | Velero | ≥1.12 | Kubernetes backup and disaster recovery |
 | Chaos Mesh | ≥2.6 | Chaos engineering platform |
 
-#### Sloth
+#### Go (required for Sloth)
 
-Generates Prometheus recording and alerting rules from SLO specifications.
+Go is needed to install Sloth via `go install`. If you already have Go installed, skip this step.
 
 **macOS:**
 ```bash
-brew install slok/sloth/sloth
+brew install go
 ```
 
 **Linux (Ubuntu/Debian):**
 ```bash
-curl -L -o sloth https://github.com/slok/sloth/releases/latest/download/sloth-linux-amd64
-chmod +x sloth && sudo mv sloth /usr/local/bin/
+# See https://go.dev/doc/install for the latest version
 ```
 
-**Windows:**
-```powershell
-# Download from https://github.com/slok/sloth/releases
-# Extract and add sloth.exe to your PATH
+**Verify and configure PATH:**
+```bash
+go version
+export PATH=$PATH:$(go env GOPATH)/bin
+```
+
+> [!WARNING]
+> **Common pitfalls to watch out for**
+> - The `go install` command places binaries in `~/go/bin/` by default. If `which sloth` returns "not found" after installing Sloth, your Go bin directory is not in your PATH.
+> - Add `export PATH=$PATH:~/go/bin` to your `~/.zshrc` or `~/.bashrc` to make it permanent.
+
+#### Sloth
+
+Generates Prometheus recording and alerting rules from SLO specifications.
+
+**Option A — via Go (recommended):**
+```bash
+go install github.com/slok/sloth/cmd/sloth@latest
+```
+
+**Option B — direct binary download (no Go required):**
+
+macOS (Apple Silicon):
+```bash
+curl -L https://github.com/slok/sloth/releases/download/v0.11.0/sloth-darwin-arm64 -o /usr/local/bin/sloth && chmod +x /usr/local/bin/sloth
+```
+
+macOS (Intel):
+```bash
+curl -L https://github.com/slok/sloth/releases/download/v0.11.0/sloth-darwin-amd64 -o /usr/local/bin/sloth && chmod +x /usr/local/bin/sloth
+```
+
+Linux:
+```bash
+curl -L https://github.com/slok/sloth/releases/download/v0.11.0/sloth-linux-amd64 -o /usr/local/bin/sloth && chmod +x /usr/local/bin/sloth
 ```
 
 **Verify installation:**
@@ -1381,6 +1395,7 @@ kubectl get pods -n chaos-mesh
 > - Running chaos experiments without namespace selectors can affect system namespaces (kube-system, monitoring) and crash the cluster.
 > - Not setting experiment duration limits means a forgotten experiment keeps injecting failures indefinitely.
 > - Chaos Mesh requires privileged DaemonSet access; some security-hardened clusters block its installation.
+> - **Kind clusters:** Chaos Mesh defaults to 3 controller-manager replicas, which can exhaust memory on a single-node cluster. If pods stay `Pending` with `Insufficient memory`, scale down: `kubectl scale deployment chaos-controller-manager -n chaos-mesh --replicas=1`. Also delete namespaces from previous chapters to free memory.
 
 ---
 
@@ -1397,7 +1412,7 @@ kubectl get pods -n chaos-mesh
 Install the Python packages for the RAG pipeline, multi-agent system, and AI governance components:
 
 ```bash
-pip install langchain langchain-openai langchain-community \
+pip3 install langchain langchain-openai langchain-community \
   chromadb sentence-transformers \
   openai tiktoken \
   prometheus-client kubernetes pyyaml
@@ -1477,8 +1492,8 @@ The following table provides a quick lookup for which tools are needed per chapt
 | 9 | Crossplane* |
 | 10 | Yeoman*, Renovate*, Backstage CLI |
 | 11 | conftest*, OPA CLI*, pre-commit, prometheus-client* |
-| 12 | OpenCost*, Karpenter*, VPA*, Kyverno*, Metrics Server* |
-| 13 | Sloth*, Velero*, Chaos Mesh* |
+| 12 | OpenCost*, Karpenter*, VPA*, Metrics Server* |
+| 13 | Go*, Sloth*, Velero*, Chaos Mesh* |
 | 14 | LangChain*, OpenAI API*, ChromaDB* |
 
 > **Note:** All chapters assume the foundational tools (Git, Docker, Python, Node.js, kubectl, Kind, and Helm) are already installed. See the [Foundational Tools](#foundational-tools) section at the beginning of this appendix.

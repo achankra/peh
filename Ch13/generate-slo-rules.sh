@@ -13,9 +13,11 @@ if [ ! -f "$SLOTH_SPEC_FILE" ]; then
 fi
 
 echo "Generating Prometheus recording and alert rules from Sloth spec..."
+# Note: Sloth flags are -i (input) and -o / --out (output)
+# The long form is --out, NOT --output
 sloth generate \
-  --input "$SLOTH_SPEC_FILE" \
-  --output "$OUTPUT_FILE"
+  -i "$SLOTH_SPEC_FILE" \
+  -o "$OUTPUT_FILE"
 
 if [ $? -ne 0 ]; then
   echo "Error: Failed to generate SLO rules"

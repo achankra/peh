@@ -3,46 +3,74 @@
 # Sloth generates Prometheus recording and alerting rules from this spec.
 #
 # Usage:
-#   sloth generate -i sloth-auth-service-slo.yaml -o rules.yaml
+#   sloth generate -i sloth-auth-service-slo.yaml -o auth-slo-rules.yaml
+#   kubectl apply -f auth-slo-rules.yaml
 #
-# Generated metrics include:
-#   - slo:auth_service_availability:ratio_5m
-#   - slo:auth_service_availability:error_budget_rate
-#   - slo:auth_service_availability:error_budget_remaining
+# Generated metrics include multi-window, multi-burn-rate recording rules
+# and alerting rules for error budget tracking.
 
-version: "1"
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: auth-service-slos
+  namespace: monitoring
+spec:
+  service: auth-service
+  labels:
+    team: platform-engineering
 
-service: "auth-service"
-labels:
-  team: platform-engineering
+  slos:
+    # Availability SLO - 99.95% of auth requests succeed
+    - name: "availability"
+      objective: 99.95
+      description: "Percentage of successful authentication requests"
 
-objectives:
-  - name: availability
-    description: "Percentage of successful authentication requests"
-    indicator:
-      latency:
-        - name: "auth_request_duration_seconds"
-          buckets:
-            - 0.1
-            - 0.5
-            - 1.0
-      slo: 99.95
+      sli:
+        events:
+          # Failed auth requests (5xx errors)
+          errorQuery: sum(rate(http_requests_total{job="auth-service",code=~"(5..)"}[{{.window}}]))
+          # All auth requests
+          totalQuery: sum(rate(http_requests_total{job="auth-service"}[{{.window}}]))
+
       alerting:
-        name: auth_slo_alert
+        name: AuthAvailabilityAlert
         labels:
-          severity: critical
+          category: availability
         annotations:
           summary: "Auth service SLO at risk"
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
 
-  - name: latency
-    description: "95th percentile latency under 200ms"
-    indicator:
-      latency:
-        - name: "auth_request_duration_seconds"
-          buckets:
-            - 0.05
-            - 0.1
-            - 0.2
-      slo: 95
+    # Latency SLO - 95% of requests respond within 200ms
+    - name: "latency"
+      objective: 95
+      description: "95th percentile latency under 200ms"
+
+      sli:
+        events:
+          # Requests slower than 200ms are "errors" for this SLO
+          errorQuery: |
+            (
+              sum(rate(http_requests_total{job="auth-service"}[{{.window}}]))
+              -
+              sum(rate(http_request_duration_seconds_bucket{job="auth-service",le="0.2"}[{{.window}}]))
+            )
+          # All requests
+          totalQuery: sum(rate(http_requests_total{job="auth-service"}[{{.window}}]))
+
       alerting:
-        name: auth_latency_slo_alert
+        name: AuthLatencyAlert
+        labels:
+          category: latency
+        annotations:
+          summary: "Auth service latency SLO at risk"
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning

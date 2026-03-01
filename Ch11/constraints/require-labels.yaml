@@ -1,0 +1,23 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequireLabels
+metadata:
+  name: require-labels
+spec:
+  match:
+    excludedNamespaces:
+      - gatekeeper-system
+      - kube-system
+      - kube-public
+    kinds:
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "DaemonSet", "StatefulSet", "ReplicaSet"]
+      - apiGroups: ["batch"]
+        kinds: ["Job", "CronJob"]
+
+  parameters:
+    requiredLabels:
+      - team        # Team responsible for the application
+      - owner       # Owner's email for escalations
+      - cost-center # Cost center for chargeback
+
+  enforcementAction: dryrun

@@ -1,0 +1,32 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRestrictImageRegistries
+metadata:
+  name: restrict-image-registries
+spec:
+  match:
+    excludedNamespaces:
+      - gatekeeper-system
+      - kube-system
+      - kube-public
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "DaemonSet", "StatefulSet", "ReplicaSet"]
+      - apiGroups: ["batch"]
+        kinds: ["Job", "CronJob"]
+
+  parameters:
+    # Approved registries (add your corporate registries here)
+    allowedRegistries:
+      - gcr.io/
+      - registry.example.com/
+      - quay.io/my-org/
+      - docker.io/library/  # Official Docker Hub images only
+      - k8s.gcr.io/
+
+    # Allow Docker Hub implicit registry (docker.io)
+    allowUndeclaredRegistries: false
+
+  # Start in audit mode
+  enforcementAction: dryrun

@@ -1,231 +1,116 @@
+# Chaos Mesh Workflow - Chained Chaos Experiments
+# Runs pod failure → network delay → recovery verification in sequence
+#
+# Prerequisites:
+#   1. Chaos Mesh installed
+#   2. Target namespace and workloads exist:
+#      kubectl create namespace chaos-testing
+#      kubectl create deployment demo-app --image=nginx:alpine --replicas=3 -n chaos-testing
+
+---
+# Workflow 1: Sequential resilience test (pod kill → network delay)
 apiVersion: chaos-mesh.org/v1alpha1
 kind: Workflow
 metadata:
   name: resilience-test-workflow
   namespace: chaos-testing
 spec:
-  # Workflow entry point
-  entrypoint: resilience-test
-  
-  # Service account for workflow execution
-  serviceAccountName: chaos-mesh
-  
-  # Templates define the workflow steps
+  entry: resilience-test
   templates:
-    # Main workflow template
+    # Entry: serial execution of steps
     - name: resilience-test
-      steps:
-        # Step 1: Pod failure test
-        - - name: pod-failure-step
-            template: pod-failure-template
-              arguments: {}
-        
-        # Step 2: Network delay test (after pod failure completes)
-        - - name: network-delay-step
-            template: network-delay-template
-              arguments: {}
-        
-        # Step 3: Verification and recovery check
-        - - name: verify-recovery-step
-            template: verify-recovery-template
-              arguments: {}
-    
-    # Template for pod failure chaos
-    - name: pod-failure-template
-      chaos:
+      templateType: Serial
+      deadline: "10m"
+      children:
+        - pod-kill-step
+        - network-delay-step
+
+    # Step 1: Kill a pod
+    - name: pod-kill-step
+      templateType: PodChaos
+      deadline: "1m"
+      podChaos:
         action: pod-kill
-        selector:
-          namespaces:
-            - team-alpha
-          labelSelectors:
-            app: demo-app
-        mode: fixed-percent
-        value: "30"
-        duration: 30s
-        gracePeriod: 5
-    
-    # Template for network delay chaos
-    - name: network-delay-template
-      chaos:
-        action: network-delay
-        selector:
-          namespaces:
-            - team-alpha
-          labelSelectors:
-            app: demo-app
         mode: one
-        duration: 60s
-        
-        # Network delay parameters
-        delaySpec:
-          latency: 100ms
-          jitter: 10ms
-          correlation: 100
-          reorder: "0%"
-    
-    # Template for verification and recovery
-    - name: verify-recovery-template
-      script:
-        image: bitnami/kubectl:latest
-        command: [sh]
-        source: |
-          #!/bin/bash
-          set -e
-          
-          echo "=== Verifying cluster recovery ==="
-          
-          # Check pod status
-          echo "Checking pod status..."
-          kubectl get pods -n team-alpha -l app=demo-app -o wide
-          
-          # Wait for pods to be ready
-          echo "Waiting for pods to be ready..."
-          kubectl wait --for=condition=Ready pod \
-            -l app=demo-app \
-            -n team-alpha \
-            --timeout=300s || echo "Warning: Some pods not ready within timeout"
-          
-          # Check deployment status
-          echo "Checking deployment status..."
-          kubectl get deployment demo-app -n team-alpha -o wide
-          
-          # Verify service endpoints
-          echo "Verifying service endpoints..."
-          kubectl get endpoints demo-app -n team-alpha
-          
-          # Test service connectivity
-          echo "Testing service connectivity..."
-          POD=$(kubectl get pod -n team-alpha -l app=demo-app -o jsonpath='{.items[0].metadata.name}')
-          if [ -n "$POD" ]; then
-            echo "Testing from pod: $POD"
-            kubectl exec -it $POD -n team-alpha -- \
-              wget -q -O- http://localhost:8080/health || echo "Service check completed"
-          fi
-          
-          echo "=== Recovery verification complete ==="
+        selector:
+          namespaces:
+            - chaos-testing
+          labelSelectors:
+            app: demo-app
+
+    # Step 2: Inject network delay
+    - name: network-delay-step
+      templateType: NetworkChaos
+      deadline: "2m"
+      networkChaos:
+        action: delay
+        mode: all
+        selector:
+          namespaces:
+            - chaos-testing
+          labelSelectors:
+            app: demo-app
+        direction: to
+        delay:
+          latency: "100ms"
+          jitter: "10ms"
 
 ---
+# Workflow 2: Cascading failure test (parallel pod + network chaos)
 apiVersion: chaos-mesh.org/v1alpha1
 kind: Workflow
 metadata:
   name: cascading-failure-test
   namespace: chaos-testing
 spec:
-  entrypoint: cascading-test
-  serviceAccountName: chaos-mesh
-  
+  entry: cascading-test
   templates:
+    # Entry: parallel execution then serial verification
     - name: cascading-test
-      steps:
-        # Step 1: Kill primary service pods
-        - - name: kill-primary
-            template: kill-service
-            arguments:
-              parameters:
-                - name: service
-                  value: demo-app
-                - name: percentage
-                  value: "50"
-        
-        # Step 2: Kill dependent service pods
-        - - name: kill-dependent
-            template: kill-service
-            arguments:
-              parameters:
-                - name: service
-                  value: database
-                - name: percentage
-                  value: "25"
-        
-        # Step 3: Inject network issues
-        - - name: network-issues
-            template: network-chaos
-    
-    - name: kill-service
-      inputs:
-        parameters:
-          - name: service
-          - name: percentage
-      chaos:
-        action: pod-kill
-        selector:
-          namespaces:
-            - team-alpha
-          labelSelectors:
-            app: "{{ inputs.parameters.service }}"
-        mode: fixed-percent
-        value: "{{ inputs.parameters.percentage }}"
-        duration: 60s
-    
-    - name: network-chaos
-      chaos:
-        action: network-delay
-        selector:
-          namespaces:
-            - team-alpha
-        mode: all
-        duration: 90s
-        delaySpec:
-          latency: 200ms
-          jitter: 50ms
+      templateType: Serial
+      deadline: "10m"
+      children:
+        - parallel-chaos
+        - verify-recovery
 
----
-apiVersion: chaos-mesh.org/v1alpha1
-kind: Workflow
-metadata:
-  name: comprehensive-resilience-test
-  namespace: chaos-testing
-spec:
-  entrypoint: comprehensive-test
-  serviceAccountName: chaos-mesh
-  parallelism: 2
-  
-  templates:
-    - name: comprehensive-test
-      dag:
-        tasks:
-          # Pod failure test
-          - name: pod-failure
-            template: pod-failure-chaos
-          
-          # Concurrent network test
-          - name: network-test
-            template: network-chaos-template
-          
-          # Depends on both above
-          - name: verify
-            template: verify-resilience
-            dependencies: "pod-failure,network-test"
-    
-    - name: pod-failure-chaos
-      chaos:
+    # Run pod kill and network loss in parallel
+    - name: parallel-chaos
+      templateType: Parallel
+      deadline: "3m"
+      children:
+        - parallel-pod-kill
+        - parallel-network-loss
+
+    - name: parallel-pod-kill
+      templateType: PodChaos
+      deadline: "2m"
+      podChaos:
         action: pod-kill
+        mode: fixed-percent
+        value: "50"
         selector:
           namespaces:
-            - team-alpha
+            - chaos-testing
           labelSelectors:
             app: demo-app
-        mode: fixed-percent
-        value: "40"
-        duration: 45s
-    
-    - name: network-chaos-template
-      chaos:
-        action: network-loss
+
+    - name: parallel-network-loss
+      templateType: NetworkChaos
+      deadline: "2m"
+      networkChaos:
+        action: loss
+        mode: all
         selector:
           namespaces:
-            - team-alpha
-        mode: all
-        duration: 60s
-        lossSpec:
-          loss: "10%"
+            - chaos-testing
+          labelSelectors:
+            app: demo-app
+        direction: to
+        loss:
+          loss: "10"
           correlation: "25"
-    
-    - name: verify-resilience
-      script:
-        image: bitnami/kubectl:latest
-        command: [sh]
-        source: |
-          echo "Verifying resilience after chaos tests..."
-          kubectl get pods -n team-alpha -o wide
-          echo "Resilience verification complete"
+
+    # After chaos, pause to let pods recover
+    - name: verify-recovery
+      templateType: Suspend
+      deadline: "1m"

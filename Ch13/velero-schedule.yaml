@@ -91,17 +91,8 @@ spec:
     # Snapshot settings for persistent volumes
     snapshotVolumes: false
 
-    # Metadata options
-    labels:
-      schedule-type: daily
-      backup-retention: "7days"
-      backup-trigger: "schedule"
-
     # CSI snapshot configuration
     csiSnapshotTimeout: 10m
-
-    # Partial backups allowed
-    orderByClusterVersion: false
 
 ---
 apiVersion: velero.io/v1
@@ -127,7 +118,3 @@ spec:
     ttl: 72h  # Keep hourly backups for 3 days
 
     snapshotVolumes: false
-
-    labels:
-      schedule-type: hourly
-      backup-retention: "3days"

@@ -1,6 +1,6 @@
 # OPA Gatekeeper Installation Manifest
 # Installs OPA Gatekeeper as an admission controller in Kubernetes
-# Alternative: Use Helm instead - helm install gatekeeper/gatekeeper -n gatekeeper-system --create-namespace
+# Alternative: Use Helm instead - helm install gatekeeper gatekeeper/gatekeeper -n gatekeeper-system --create-namespace
 
 ---
 # Namespace for Gatekeeper
@@ -360,7 +360,7 @@ data:
 ---
 # Notes on setup:
 # 1. This manifest deploys a basic Gatekeeper setup
-# 2. For production, use Helm chart: helm install gatekeeper/gatekeeper -n gatekeeper-system --create-namespace
+# 2. For production, use Helm chart: helm install gatekeeper gatekeeper/gatekeeper -n gatekeeper-system --create-namespace
 # 3. TLS certificates must be provisioned separately (use cert-manager or manual certificates)
 # 4. Webhook CA bundle must be injected (use mutating-webhook-injection)
 # 5. Adjust resource limits based on your cluster size

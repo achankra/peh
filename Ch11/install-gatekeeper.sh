@@ -20,8 +20,7 @@ kubectl create namespace "${GATEKEEPER_NAMESPACE}" --dry-run=client -o yaml | ku
 
 # Install Gatekeeper
 echo "Installing Gatekeeper..."
-helm install gatekeeper/gatekeeper \
-  --name-template gatekeeper \
+helm install gatekeeper gatekeeper/gatekeeper \
   --namespace "${GATEKEEPER_NAMESPACE}" \
   --create-namespace \
   --set enableExternalData=true \
