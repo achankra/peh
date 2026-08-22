@@ -73,6 +73,8 @@ yarn-error.log*
 *.key
 *.crt
 Ch01/secrets-setup/*.json
+Ch01/pulumi-repo/Pulumi.dev.yaml
+Ch01/pulumi-repo/config/platform_team_values.yaml
 
 # ===============================
 # OS / Temp Files
