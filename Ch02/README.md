@@ -601,6 +601,8 @@ Successfully installed pulumi-3.x.x pulumi-kubernetes-4.x.x pyyaml-6.x
 
 **Step 2b: Initialize Pulumi Stack**
 ```bash
+# as we are in a dev env. see Ch01 as well
+export PULUMI_CONFIG_PASSPHRASE=""
 pulumi stack init dev
 # Or select existing stack: pulumi stack select dev
 ```
@@ -616,7 +618,7 @@ Default runtime language python
 ```bash
 # For Kind cluster (local development):
 pulumi config set cluster:name platform-dev
-pulumi config set cluster:kubernetesVersion 1.27
+pulumi config set cluster:kubernetesVersion 1.37
 
 pulumi config set cluster:numWorkerNodes 2
 ```
@@ -624,7 +626,7 @@ pulumi config set cluster:numWorkerNodes 2
 **Expected Output:**
 ```
 Set 'cluster:name' to 'platform-dev'
-Set 'cluster:kubernetesVersion' to '1.27'
+Set 'cluster:kubernetesVersion' to '1.37'
 ```
 
 ### Phase 3: Cluster Deployment
@@ -634,7 +636,7 @@ Set 'cluster:kubernetesVersion' to '1.27'
 The Kind cluster must exist **before** running Pulumi. Pulumi provisions namespaces and quotas on an already-running cluster.
 
 ```bash
-kind create cluster --name platform-dev --config - <<EOF
+kind create cluster --name platform-dev --image kindest/node:v1.37.0 --config - <<EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
@@ -652,7 +654,7 @@ EOF
 **Expected Output:**
 ```
 Creating cluster "platform-dev" ...
- ✓ Ensuring node image (kindest/node:v1.28.0) 🖼
+ ✓ Ensuring node image (kindest/node:v1.37.0) 🖼
  ✓ Preparing nodes 📦 📦 📦
  ✓ Writing configuration 📜
  ✓ Starting control-plane 🕹️
@@ -680,6 +682,7 @@ platform-dev-worker2         Ready    <none>          1m    v1.28.0
 Pulumi fetches the kubeconfig from the running Kind cluster automatically and creates namespaces, resource quotas, and limit ranges.
 
 ```bash
+pulumi preview
 pulumi up --yes
 ```
 
@@ -720,6 +723,9 @@ platform-system   Active   10s   environment=dev,managed-by=pulumi
 
 **Step 4a: Install Flux GitOps Controller**
 ```bash
+# check version, which should be as displayed or higher
+flux --version                                                        
+flux version 2.9.4
 # Option 1: Using Flux CLI (recommended)
 flux install --namespace flux-system
 
@@ -742,7 +748,7 @@ flux check
 **Expected Output:**
 ```
 ► checking prerequisites
-✓ kubernetes 1.28.0 >= 1.20.6
+✔ Kubernetes 1.37.0 >=1.33.0-0
 ✓ kustomize 5.x.x >= 3.1.0
 ...
 all checks passed
@@ -754,6 +760,8 @@ Apply the manifest. Namespaces, HelmRepositories, and HelmReleases will be creat
 
 ```bash
 kubectl create namespace application
+kubectl apply -f platform-services.yaml
+# after expected warnings run again, as CRDs are installed then
 kubectl apply -f platform-services.yaml
 ```
 
@@ -900,17 +908,16 @@ metadata:
 **Step 7a: Run BATS Tests**
 ```bash
 # From the root code directory
-bats test/infrastructure.bats -v
+bats test/infrastructure.bats --verbose-run
 ```
 
 **Expected Output:**
 ```
- ✓ cluster_is_running
- ✓ namespaces_exist
- ✓ flux_is_ready
- ✓ istio_injection_enabled
-
-4 tests, 0 failures
+1..4
+ok 1 cluster_is_running
+ok 2 namespaces_exist
+ok 3 flux_is_ready
+ok 4 istio_injection_enabled
 ```
 
 **Step 7b: Run Python Health Checks**
@@ -1036,7 +1043,7 @@ Customize cluster parameters:
 # Development cluster
 dev_cluster = KindClusterConfig(
     cluster_name="platform-dev",
-    kubernetes_version="1.27.0",
+    kubernetes_version="1.37.0",
     num_worker_nodes=2,
     enable_ingress=True,
     enable_metrics_server=True,
@@ -1045,7 +1052,7 @@ dev_cluster = KindClusterConfig(
 # Production-like cluster
 prod_cluster = KindClusterConfig(
     cluster_name="platform-prod",
-    kubernetes_version="1.27.0",
+    kubernetes_version="1.37.0",
     num_worker_nodes=3,
     api_server_port=6443,
     extra_port_mappings=[

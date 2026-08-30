@@ -76,6 +76,7 @@ Ch01/secrets-setup/*.json
 Ch01/pulumi-repo/Pulumi.dev.yaml
 Ch01/pulumi-repo/config/platform_team_values.yaml
 Ch01/platform-config.yaml
+Ch02/pulumi-cluster/Pulumi.dev.yaml
 
 # ===============================
 # OS / Temp Files
