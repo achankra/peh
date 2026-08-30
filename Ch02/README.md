@@ -120,6 +120,7 @@ Python unittest framework for cluster health validation.
 - `modules/flux.py` - Flux configuration module
 - `platform-services.yaml` - Platform services kustomization
 - `istio-mesh-config.yaml` - Istio service mesh configuration
+- `scripts/port-forward.sh` - Background port-forwards for Grafana, Prometheus, Alertmanager
 
 #### modules/flux.py
 
@@ -859,6 +860,35 @@ NAMESPACE        NAME                AGE
 platform-apps    platform-gateway    2m
 platform-apps    platform-ingress    2m
 ```
+
+### Local UI Access: Grafana, Prometheus, Alertmanager
+
+`scripts/port-forward.sh` starts a background `kubectl port-forward` for each
+observability UI instead of running them by hand. PIDs are tracked in a
+gitignored `scripts/.port-forward.pids` so `stop` kills exactly what `start`
+launched.
+
+```bash
+scripts/port-forward.sh start    # Grafana :3000, Prometheus :9090, Alertmanager :9093
+scripts/port-forward.sh status
+scripts/port-forward.sh stop
+```
+
+Log in to Grafana at [http://localhost:3000](http://localhost:3000) with
+username `admin` and password `admin` — set explicitly via
+`grafana.adminPassword` in `platform-services.yaml` (line ~268).
+
+If you change or remove that value, the chart auto-generates a password
+instead; retrieve it with:
+```bash
+kubectl get secret -n monitoring monitoring-kube-prometheus-stack-grafana \
+  -o jsonpath='{.data.admin-password}' | base64 -d; echo
+```
+
+Flux and Istio don't have a bundled web UI in this chapter's deployment, so
+they aren't included. If you installed the monitoring stack manually with a
+different Helm release name, override the service names — see the header
+comment in `scripts/port-forward.sh`.
 
 ### Phase 6: Namespace Provisioning
 

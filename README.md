@@ -156,6 +156,8 @@ Chapter 3 deploys Gatekeeper as part of cluster security. Chapter 11 goes much d
 
 The monitoring stack from Chapter 4 is assumed to be running in later chapters. If you're jumping straight to Chapter 12 or 13, make sure Prometheus is deployed in your cluster first.
 
+Chapter 2's `scripts/port-forward.sh` starts background port-forwards for Grafana, Prometheus, and Alertmanager UIs together and tracks their PIDs for a clean shutdown — see [Ch02/README.md](Ch02/README.md#local-ui-access-grafana-prometheus-alertmanager).
+
 ### Keycloak — Identity Provider
 
 **Introduced:** Chapter 3 (securing platform access)
@@ -311,11 +313,16 @@ kubectl get pods -A              # Check all pods are Running
 kubectl get nodes                # Should show one Ready node
 ```
 
-Then re-run any `kubectl port-forward` commands from your chapter's README. For example, for Chapter 4:
+Then re-run any `kubectl port-forward` commands from your chapter's README.
+Chapter 2 ships `Ch02/scripts/port-forward.sh` to manage these in the
+background instead of running them by hand; if you installed the monitoring
+stack manually per the commands above (Helm release name `monitoring`),
+override its service names:
 
 ```bash
-kubectl port-forward -n monitoring svc/prometheus-operated 9090:9090 &
-kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80 &
+GRAFANA_SVC=svc/monitoring-grafana \
+PROMETHEUS_SVC=svc/prometheus-operated \
+  Ch02/scripts/port-forward.sh start
 
 # Retrieve the Grafana admin password
 kubectl get secret monitoring-grafana -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d; echo
