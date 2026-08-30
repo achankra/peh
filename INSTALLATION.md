@@ -49,7 +49,7 @@ Before we start coding, you will need to ensure that the tooling used is set up 
 We recommend creating a dedicated GitHub organization for practicing this book. While you can use a personal repository, it will not give you access to some of the organizational settings used, as well as the ability to add "mock" development accounts for different personas.
 
 1. Create a new Organization using the documentation at [GitHub Docs: Creating a new organization](https://docs.github.com/en/organizations/collaborating-with-groups-in-organizations/creating-a-new-organization-from-scratch). Use an appropriate name like `<<yourname>>-peh-org`.
-2. Create a Fine-Grained Personal Access Token authorized for use by the organization using the [GitHub PAT documentation](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
+2. Create a Fine-Grained Personal Access Token authorized for use by the organization using the [GitHub PAT documentation](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens). It needs to be owned by the organization!
 3. The following permissions are needed for the PAT to work with the exercises in this book:
    - Access to all repositories in your organization (not your personal account)
    - Administration: Read & Write
@@ -57,6 +57,7 @@ We recommend creating a dedicated GitHub organization for practicing this book. 
    - Contents: Read & Write
    - Custom Properties: Read & Write
    - Metadata: Read-Only
+   - For the organization: Members: Read & Write 
 4. Take note of this token for now, we will keep it in a secret store later.
 
 > [!WARNING]
@@ -485,11 +486,14 @@ pre-commit --version
 
 #### Python Testing and Quality Tools
 
-Install the Python testing tools in a virtual environment or globally:
+Install the Python testing tools into Chapter 1's project-local virtual
+environment (see `Ch01/requirements.txt`):
 
 ```bash
-pip3 install pytest pytest-cov pyyaml
-# On Linux, add --break-system-packages if installing globally
+cd Ch01
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
 ---

@@ -1,0 +1,9 @@
+name: platform-repo-automation
+runtime:
+  name: python
+  options:
+    virtualenv: venv
+description: >
+  Chapter 1: Laying the Groundwork
+  Creates GitHub repositories and manages organization membership from
+  config/platform_team_values.yaml.

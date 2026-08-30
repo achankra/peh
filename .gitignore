@@ -65,12 +65,18 @@ yarn-error.log*
 
 # ===============================
 # Environment / Secrets
+# or files containing secrets
 # ===============================
 .env
 .env.*
 *.pem
 *.key
 *.crt
+Ch01/secrets-setup/*.json
+Ch01/pulumi-repo/Pulumi.dev.yaml
+Ch01/pulumi-repo/config/platform_team_values.yaml
+Ch01/platform-config.yaml
+Ch02/pulumi-cluster/Pulumi.dev.yaml
 
 # ===============================
 # OS / Temp Files
@@ -101,3 +107,11 @@ htmlcov/
 *.tar.gz
 *.tgzCh10/order-service/
 Ch09/crossplane
+
+# ===============================
+# Claude Code assets
+# ===============================
+docs/builds/
+docs/plan/
+.claude/
+.codegraph/

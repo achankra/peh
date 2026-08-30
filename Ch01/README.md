@@ -48,8 +48,8 @@ This section maps each code file to its corresponding chapter concept and usage:
 
 | File | Chapter Concept | Purpose | Type |
 |------|-----------------|---------|------|
-| `pulumi_repo_create.py` | Section 1.4: Automating Repository Creation | Pulumi program that creates GitHub repositories and manages organization membership using config/platform_team_values.yaml as its source of truth | Python / Pulumi |
-| `config/platform_team_values.yaml` | Section 1.4: Repository & Team Configuration | Central configuration file defining all GitHub repositories and organization members managed by the Pulumi automation. Edit this file and run `pulumi up` to apply changes. | YAML Config |
+| `pulumi-repo/__main__.py` | Section 1.4: Automating Repository Creation | Pulumi program that creates GitHub repositories and manages organization membership using config/platform_team_values.yaml as its source of truth | Python / Pulumi |
+| `pulumi-repo/config/platform_team_values.yaml` | Section 1.4: Repository & Team Configuration | Central configuration file defining all GitHub repositories and organization members managed by the Pulumi automation. Edit this file and run `pulumi up` to apply changes. | YAML Config |
 
 ### Secrets Setup
 
@@ -75,11 +75,17 @@ This section maps each code file to its corresponding chapter concept and usage:
 
 ### Python Dependencies
 
-Install dependencies using pip:
+Create a virtual environment and install dependencies from `requirements.txt`:
 
 ```bash
-pip install pyyaml pytest
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 ```
+
+Every command shown below (`python platform-maturity-assessment.py`, etc.)
+assumes the venv is active — the commands themselves are unchanged, only
+`python` now resolves inside `.venv`.
 
 **Package Details:**
 - **pyyaml**: Required for parsing `platform-config.yaml` in all validation and assessment tools
@@ -92,6 +98,11 @@ pip install pyyaml pytest
   # macOS: brew install pulumi/tap/pulumi
   # Linux: curl -fsSL https://get.pulumi.com | sh
   ```
+  The GitHub repository automation (`pulumi-repo/`) is its own Pulumi
+  project with a `Pulumi.yaml` and `requirements.txt`. Pulumi manages its
+  Python dependencies (`pulumi`, `pulumi-github`, `pyyaml`) automatically
+  in a project-local virtualenv the first time you run `pulumi preview` or
+  `pulumi up` inside `pulumi-repo/` — no manual `pip install` needed.
 
 - **pre-commit**: Git hook framework for enforcing code quality checks before commits
   ```bash
@@ -121,18 +132,35 @@ pip install pyyaml pytest
 3. Upload your book secrets to Bitwarden (run once):
    ```bash
    cd secrets-setup
+   cp github_secrets.json.example github_secrets.json
+   nano github_secrets.json # replace placeholders
+   # if you chose an eu server, adapt the server config as follows
+   bw config server https://vault.bitwarden.eu
+   # then inject the secrets
    chmod +x inject_secrets.sh
    ./inject_secrets.sh
+   cd ..
    ```
 
-4. Set Pulumi config values for the GitHub provider:
+4. Initialize the Pulumi project and set config values for the GitHub provider:
    ```bash
-   pulumi config set github:token  ghp_your_token_here --secret
+   cd pulumi-repo
+
+   # Using Pulumi's local backend (no pulumi.com account)? It encrypts
+   # stack secrets with a passphrase. Set one (empty is fine for local
+   # learning use) so `stack init` doesn't prompt interactively:
+   export PULUMI_CONFIG_PASSPHRASE=""
+
+   pulumi stack init dev   # first time only
+   read -s PEH_GITHUB_TOKEN
+   pulumi config set github:token  $PEH_GITHUB_TOKEN --secret
    pulumi config set github:owner  your-github-org
    ```
 
-5. Edit `config/platform_team_values.yaml` to define your repositories and team members, then apply:
+5. Edit `pulumi-repo/config/platform_team_values.yaml` to define your repositories and team members, then apply (still inside `pulumi-repo/`):
    ```bash
+   cp config/platform_team_values.yaml.example config/platform_team_values.yaml
+   nano config/platform_team_values.yaml
    pulumi preview    # dry-run first
    pulumi up         # apply
    ```
@@ -148,6 +176,8 @@ Follow this execution order to work through the Chapter 1 concepts:
 Run the platform maturity assessment to evaluate where your organization stands:
 
 ```bash
+# if not done yet
+source .venv/bin/activate
 python platform-maturity-assessment.py
 ```
 
@@ -189,6 +219,8 @@ Overall Platform Maturity Score: 3.8/5.0
 Edit `platform-config.yaml` to match your organization:
 
 ```bash
+# Make a local copy of the template
+cp platform-config.yaml.example platform-config.yaml
 # Review the current configuration
 cat platform-config.yaml
 
@@ -565,20 +597,22 @@ cat assessment_results.json
 ```bash
 Error: PyYAML not installed. Install with: pip install pyyaml
 ```
-**Solution:** Install PyYAML
+**Solution:** Activate the venv and install from `requirements.txt` (see
+[Python Dependencies](#python-dependencies)):
 ```bash
-pip install pyyaml
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
 **Issue: Python version too old**
 ```bash
 Error: Python 3.8+ required
 ```
-**Solution:** Update Python or use a virtual environment with Python 3.8+
+**Solution:** Update Python, then recreate the venv with the newer interpreter:
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install pyyaml pytest
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
 **Issue: Git hooks installation fails**
@@ -700,8 +734,15 @@ Ch01/
 │   ├── install-githooks.sh            # Install Git hooks
 │   └── upload-secrets.sh              # Upload secrets to Bitwarden
 │
-└── secrets-setup/
-    └── github_secrets.json            # GitHub secrets template
+├── secrets-setup/
+│   └── github_secrets.json.example    # GitHub secrets template
+│
+└── pulumi-repo/                       # Pulumi project: GitHub repo & team automation
+    ├── Pulumi.yaml                    # Project definition (Python runtime)
+    ├── __main__.py                    # Pulumi program (repos, branch protection, membership)
+    ├── requirements.txt                # pulumi, pulumi-github, pyyaml
+    └── config/
+        └── platform_team_values.yaml  # Repositories & team members (edit this, then `pulumi up`)
 ```
 
 ---
