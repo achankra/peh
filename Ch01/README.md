@@ -219,6 +219,8 @@ Overall Platform Maturity Score: 3.8/5.0
 Edit `platform-config.yaml` to match your organization:
 
 ```bash
+# Make a local copy of the template
+cp platform-config.yaml.example platform-config.yaml
 # Review the current configuration
 cat platform-config.yaml
 
