@@ -165,8 +165,10 @@ class AlertCorrelator:
                 if j in used:
                     continue
                 
+                # Same host within the time window is correlated even when
+                # the metrics differ (e.g. CPU + memory on one server)
                 similarity = self._calculate_similarity(alert, other)
-                if similarity > self.SIMILARITY_THRESHOLD:
+                if similarity > self.SIMILARITY_THRESHOLD or alert.source == other.source:
                     cluster.append(other)
                     used.add(j)
             
@@ -314,14 +316,16 @@ class AlertCorrelator:
         
         scores = [i.correlation_score for i in self.incidents]
         critical = sum(1 for i in self.incidents if i.severity == 'critical')
-        
+        total_alerts = sum(len(i.alerts) for i in self.incidents)
+
         return {
             'total_incidents': len(self.incidents),
-            'total_alerts': sum(len(i.alerts) for i in self.incidents),
-            'avg_alerts_per_incident': sum(len(i.alerts) for i in self.incidents) / len(self.incidents),
+            'total_alerts': total_alerts,
+            'avg_alerts_per_incident': total_alerts / len(self.incidents),
             'avg_correlation_score': sum(scores) / len(scores),
             'critical_count': critical,
-            'noise_reduction': f"{(1 - sum(len(i.alerts) for i in self.incidents) / sum(1 for i in self.incidents)) * 100:.1f}%"
+            # Fewer incidents than alerts = less noise for the on-call engineer
+            'noise_reduction': f"{(1 - len(self.incidents) / total_alerts) * 100:.1f}%"
         }
 
 
@@ -376,7 +380,7 @@ def create_sample_alerts() -> List[Alert]:
         ),
         Alert(
             id="alert-5",
-            timestamp=now + 120,  # Outside time window
+            timestamp=now + 600,  # Outside the 300s time window
             alert_type="threshold",
             severity="info",
             source="cache-server",

@@ -2,14 +2,26 @@
 # Chart repo: https://backstage.github.io/charts
 # Docs: https://github.com/backstage/charts
 #
+# Tested with: Helm chart backstage/backstage 2.10.2, image tag 1.55.2
+#   Install with the matching chart version:
+#     helm upgrade --install backstage backstage/backstage \
+#       --version 2.10.2 --namespace backstage -f backstage-helm-values.yaml
+#
 # Prerequisites:
-#   1. Create a GitHub Personal Access Token (classic) with 'repo' scope:
-#      https://github.com/settings/tokens/new
-#   2. Export it: export GITHUB_TOKEN=ghp_YourTokenHere
+#   1. Create a GitHub Personal Access Token. Recommended: fine-grained with
+#      Contents: Read-only on your catalog repos:
+#      https://github.com/settings/personal-access-tokens/new
+#      (fallback: classic token with 'repo' scope)
+#   2. Load it into your shell (see the chapter README, "Secrets"):
+#      source load-secrets.sh     # Bitwarden, or use the .env_example fallback
 #   3. Create the Kubernetes secret:
-#      kubectl create namespace backstage
+#      (labels below are required if the Chapter 3 Gatekeeper policy is installed)
+#      kubectl create namespace backstage --dry-run=client -o yaml \
+#        | kubectl label --local -f - team=platform environment=dev cost-center=10001 -o yaml \
+#        | kubectl apply -f -
 #      kubectl create secret generic backstage-secrets \
-#        --namespace backstage --from-literal=GITHUB_TOKEN=$GITHUB_TOKEN
+#        --namespace backstage --from-literal=GITHUB_TOKEN="$GITHUB_TOKEN" \
+#        --dry-run=client -o yaml | kubectl apply -f -
 #
 # How config loading works:
 #   The default Backstage Docker image ships with a built-in app-config.yaml
@@ -37,7 +49,9 @@ backstage:
   image:
     registry: ghcr.io
     repository: backstage/backstage
-    tag: "latest"
+    # Pinned: the install depends on this image's built-in app-config.yaml
+    # (guest auth, GITHUB_TOKEN integration). "latest" can change that contract.
+    tag: "1.55.2"
     pullPolicy: IfNotPresent
 
   containerPorts:
@@ -138,6 +152,15 @@ postgresql:
   primary:
     persistence:
       enabled: false    # No default StorageClass in Kind
+    # CPU/memory limits are required by the Chapter 3 Gatekeeper policy
+    # (require-limits); without them the PostgreSQL pod is never created.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
 
 # --- Service Account ---
 serviceAccount:

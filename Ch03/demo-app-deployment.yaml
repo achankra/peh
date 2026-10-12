@@ -52,8 +52,6 @@ metadata:
 data:
   APP_ENV: "production"
   LOG_LEVEL: "info"
-  PORT: "8080"
-  HEALTH_CHECK_PATH: "/health"
 
 ---
 # Secret: Application secrets (base64 encoded)
@@ -104,7 +102,7 @@ spec:
         version: "1.0"
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
+        prometheus.io/port: "9898"
         prometheus.io/path: "/metrics"
     
     spec:
@@ -139,19 +137,18 @@ spec:
       
       containers:
         - name: demo-app
-          # Use specific image version (not 'latest')
-          image: nginx:1.24-alpine
+          # podinfo: a small Go app with real /healthz, /readyz and /metrics endpoints.
+          # Specific version (not 'latest'); ghcr.io/ is on the allowed-registries
+          # list (Ch02 platform-services.yaml).
+          image: ghcr.io/stefanprodan/podinfo:6.15.0
           imagePullPolicy: IfNotPresent
-          
-          # Container ports
+
+          # Container ports (podinfo serves HTTP and /metrics on 9898 by default)
           ports:
             - name: http
-              containerPort: 8080
+              containerPort: 9898
               protocol: TCP
-            - name: metrics
-              containerPort: 9090
-              protocol: TCP
-          
+
           # Security context for container
           securityContext:
             allowPrivilegeEscalation: false
@@ -159,9 +156,7 @@ spec:
             capabilities:
               drop:
                 - ALL
-              add:
-                - NET_BIND_SERVICE
-          
+
           # Environment variables
           env:
             - name: APP_ENV
@@ -174,11 +169,6 @@ spec:
                 configMapKeyRef:
                   name: demo-app-config
                   key: LOG_LEVEL
-            - name: PORT
-              valueFrom:
-                configMapKeyRef:
-                  name: demo-app-config
-                  key: PORT
             - name: API_KEY
               valueFrom:
                 secretKeyRef:
@@ -199,11 +189,7 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            - name: var-cache
-              mountPath: /var/cache
-            - name: var-run
-              mountPath: /var/run
-          
+
           # Resource requests and limits
           resources:
             requests:
@@ -216,7 +202,7 @@ spec:
           # Liveness probe: Check if app is alive
           livenessProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: http
             initialDelaySeconds: 10
             periodSeconds: 10
@@ -226,7 +212,7 @@ spec:
           # Readiness probe: Check if app can accept traffic
           readinessProbe:
             httpGet:
-              path: /ready
+              path: /readyz
               port: http
             initialDelaySeconds: 5
             periodSeconds: 5
@@ -236,7 +222,7 @@ spec:
           # Startup probe: Check initial startup (slower)
           startupProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: http
             initialDelaySeconds: 0
             periodSeconds: 10
@@ -246,10 +232,6 @@ spec:
       # Volumes
       volumes:
         - name: tmp
-          emptyDir: {}
-        - name: var-cache
-          emptyDir: {}
-        - name: var-run
           emptyDir: {}
 
 ---
@@ -267,11 +249,7 @@ spec:
   ports:
     - name: http
       port: 80
-      targetPort: 8080
-      protocol: TCP
-    - name: metrics
-      port: 9090
-      targetPort: 9090
+      targetPort: 9898
       protocol: TCP
   selector:
     app: demo-app
@@ -334,6 +312,31 @@ spec:
         httpsRedirect: true    # Redirect all HTTP to HTTPS automatically
 
 ---
+# Istio AuthorizationPolicy: let external traffic for demo-app through the gateway.
+# Ch02's istio-system/allow-external only admits /health, /ready and /api/* from
+# the application namespace, so every other request to the gateway gets 403.
+# ALLOW policies are additive: this admits only the demo-app hosts and leaves
+# the Ch02 rules for all other traffic untouched.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: demo-app-allow-gateway
+  namespace: istio-system
+  labels:
+    app: demo-app
+spec:
+  selector:
+    matchLabels:
+      istio: ingressgateway
+  action: ALLOW
+  rules:
+    - to:
+        - operation:
+            hosts:
+              - demo-app.example.com
+              - www.demo-app.example.com
+
+---
 # Istio VirtualService: routes traffic entering the Gateway to the demo-app Service.
 # Teams define their own VirtualService pointing at the shared Gateway — this is
 # the only Istio resource a dev team needs to manage for external routing.
@@ -388,13 +391,11 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              name: istio-system
+              kubernetes.io/metadata.name: istio-system
       ports:
         - protocol: TCP
-          port: 8080
-        - protocol: TCP
-          port: 9090
-  
+          port: 9898
+
   # Allow egress to DNS and external services
   egress:
     # Allow DNS
@@ -409,6 +410,14 @@ spec:
       ports:
         - protocol: TCP
           port: 443
+    # Allow the Istio sidecar to reach istiod (xDS config + workload certificates)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+      ports:
+        - protocol: TCP
+          port: 15012
 
 ---
 # PodDisruptionBudget: Ensure availability during maintenance
@@ -467,13 +476,14 @@ spec:
 # Check service:
 #   kubectl get service -n demo-app
 #
-# Check ingress:
-#   kubectl get ingress -n demo-app
-#   kubectl describe ingress demo-app-ingress -n demo-app
+# Check Istio routing:
+#   kubectl get gateway -n istio-system
+#   kubectl get virtualservice -n demo-app
+#   kubectl describe virtualservice demo-app -n demo-app
 #
 # Check certificate:
-#   kubectl get certificate -n demo-app
-#   kubectl describe certificate demo-app-cert -n demo-app
+#   kubectl get certificate -n istio-system
+#   kubectl describe certificate demo-app-cert -n istio-system
 #
 # Check pod status:
 #   kubectl get pods -n demo-app -o wide

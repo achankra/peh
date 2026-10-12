@@ -1,0 +1,46 @@
+# Helm values for Chaos Mesh on the local Kind cluster (Step 3.1)
+#
+# Same settings as the original --set flags, plus resource limits and a single
+# controller replica so the pods pass the Ch11 Gatekeeper require-limits policy
+# and fit on the Kind workers.
+
+chaosDaemon:
+  privileged: true
+  runtime: containerd
+  socketPath: /run/containerd/containerd.sock
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+controllerManager:
+  enableWebhook: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+dashboard:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+
+dnsServer:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi

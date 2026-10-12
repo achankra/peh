@@ -1,6 +1,6 @@
 """
-pulumi_repo_create.py — GitHub Repository and Team Automation
-=============================================================
+__main__.py — GitHub Repository and Team Automation
+=====================================================
 Pulumi program for Chapter 1 of "The Platform Engineer's Handbook."
 
 Creates and manages:
@@ -52,7 +52,9 @@ repositories: dict[str, github.Repository] = {}
 
 for repo_def in data.get("github_repositories", []):
     repo_name: str = repo_def["name"]
-    repo_description: str = repo_def.get("description", "")
+    # YAML folded scalars (`>`) keep a trailing newline; GitHub's API rejects
+    # control characters in a repo description, so strip it here.
+    repo_description: str = repo_def.get("description", "").strip()
     visibility: str = repo_def.get("visibility", "private")
 
     repo = github.Repository(
@@ -82,7 +84,7 @@ for repo_def in data.get("github_repositories", []):
         enforce_admins=True,
         require_signed_commits=True,
         required_pull_request_reviews=[
-            github.BranchProtectionRequiredPullRequestReviewsArgs(
+            github.BranchProtectionRequiredPullRequestReviewArgs(
                 dismiss_stale_reviews=True,
                 required_approving_review_count=1,
             )

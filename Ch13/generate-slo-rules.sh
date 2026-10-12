@@ -41,6 +41,16 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "SLO rules applied successfully to cluster"
+
+# kube-prometheus-stack only loads PrometheusRules that carry its ruleSelector label
+# (release=<helm release name>); Sloth does not add it, so label the generated rules.
+RULE_RELEASE=$(kubectl get prometheus -n monitoring \
+  -o jsonpath='{.items[0].spec.ruleSelector.matchLabels.release}' 2>/dev/null || true)
+if [ -n "$RULE_RELEASE" ]; then
+  kubectl label prometheusrule -n monitoring \
+    -l app.kubernetes.io/managed-by=sloth release="$RULE_RELEASE" --overwrite
+fi
+
 echo "Recording rules and alert rules are now active in Prometheus"
 
 # Display summary

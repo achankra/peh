@@ -3,14 +3,14 @@
 
 This script generates separate Crossplane compositions for each environment
 (development, staging, production) with appropriate defaults for:
-- Resource requests (CPU, memory)
-- Storage allocation
-- Backup retention
+- Resource requests and limits (CPU, memory)
 - Replica count
-- Deletion protection
+
+EnvironmentConfig also defines storage, backup retention, deletion protection
+and monitoring defaults. They are not rendered into the compositions yet.
 
 All compositions use the Kubernetes provider to deploy PostgreSQL
-as StatefulSets inside the Kind cluster — no cloud dependencies.
+as a Deployment inside the Kind cluster — no cloud dependencies.
 """
 
 from dataclasses import dataclass
@@ -71,6 +71,61 @@ ENVIRONMENTS: Dict[str, EnvironmentConfig] = {
 
 def generate_composition(env_name: str, config: EnvironmentConfig) -> Dict[str, Any]:
     """Generate a Crossplane composition for the given environment."""
+    db_deployment = {
+        "name": "db-deployment",
+        "base": {
+            "apiVersion": "kubernetes.crossplane.io/v1alpha2",
+            "kind": "Object",
+            "spec": {
+                "forProvider": {
+                    "manifest": {
+                        "apiVersion": "apps/v1",
+                        "kind": "Deployment",
+                        "metadata": {
+                            "name": f"postgresql-{env_name}",
+                            "namespace": "databases"
+                        },
+                        "spec": {
+                            "replicas": config.replicas,
+                            "selector": {
+                                "matchLabels": {
+                                    "app": "postgresql",
+                                    "environment": env_name
+                                }
+                            },
+                            "template": {
+                                "metadata": {
+                                    "labels": {
+                                        "app": "postgresql",
+                                        "environment": env_name
+                                    }
+                                },
+                                "spec": {
+                                    "containers": [{
+                                        "name": "postgresql",
+                                        # Fully qualified so the allowed-registries
+                                        # policy (docker.io/ prefix) accepts it
+                                        "image": "docker.io/library/postgres:15-alpine",
+                                        "resources": {
+                                            "requests": {
+                                                "cpu": config.cpu_request,
+                                                "memory": config.memory_request
+                                            },
+                                            "limits": {
+                                                "cpu": config.cpu_limit,
+                                                "memory": config.memory_limit
+                                            }
+                                        }
+                                    }]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     return {
         "apiVersion": "apiextensions.crossplane.io/v1",
         "kind": "Composition",
@@ -86,56 +141,16 @@ def generate_composition(env_name: str, config: EnvironmentConfig) -> Dict[str, 
                 "apiVersion": "database.platform.io/v1alpha1",
                 "kind": "PostgreSQLInstance"
             },
-            "resources": [{
-                "name": "db-deployment",
-                "base": {
-                    "apiVersion": "kubernetes.crossplane.io/v1alpha2",
-                    "kind": "Object",
-                    "spec": {
-                        "forProvider": {
-                            "manifest": {
-                                "apiVersion": "apps/v1",
-                                "kind": "Deployment",
-                                "metadata": {
-                                    "name": f"postgresql-{env_name}",
-                                    "namespace": "databases"
-                                },
-                                "spec": {
-                                    "replicas": config.replicas,
-                                    "selector": {
-                                        "matchLabels": {
-                                            "app": "postgresql",
-                                            "environment": env_name
-                                        }
-                                    },
-                                    "template": {
-                                        "metadata": {
-                                            "labels": {
-                                                "app": "postgresql",
-                                                "environment": env_name
-                                            }
-                                        },
-                                        "spec": {
-                                            "containers": [{
-                                                "name": "postgresql",
-                                                "image": "postgres:15-alpine",
-                                                "resources": {
-                                                    "requests": {
-                                                        "cpu": config.cpu_request,
-                                                        "memory": config.memory_request
-                                                    },
-                                                    "limits": {
-                                                        "cpu": config.cpu_limit,
-                                                        "memory": config.memory_limit
-                                                    }
-                                                }
-                                            }]
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+            # Crossplane v2 only supports pipeline mode: the resources are
+            # rendered by function-patch-and-transform (crossplane-providers.yaml)
+            "mode": "Pipeline",
+            "pipeline": [{
+                "step": "patch-and-transform",
+                "functionRef": {"name": "function-patch-and-transform"},
+                "input": {
+                    "apiVersion": "pt.fn.crossplane.io/v1beta1",
+                    "kind": "Resources",
+                    "resources": [db_deployment]
                 }
             }]
         }

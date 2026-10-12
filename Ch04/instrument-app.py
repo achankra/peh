@@ -66,37 +66,58 @@ class StructuredLogger:
         getattr(self.logger, level.lower())(json.dumps(log_entry))
 
 
+# Latency histogram bucket upper bounds in seconds (5ms to 5s)
+LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0)
+
+
 # Global metrics storage (simple in-memory, replace with proper metrics in production)
 class MetricsCollector:
-    """Simple metrics collector for demonstration."""
-    
+    """Simple metrics collector that renders Prometheus text format."""
+
     def __init__(self):
-        self.request_count = 0
+        self.requests_by_status = {}  # status code -> request count
         self.error_count = 0
-        self.total_latency = 0.0
-        self.latencies = []
-    
-    def record_request(self, latency: float, status_code: int):
-        """Record request metrics."""
-        self.request_count += 1
-        self.total_latency += latency
-        self.latencies.append(latency)
+        self.bucket_counts = [0] * len(LATENCY_BUCKETS)  # cumulative, like "le"
+        self.latency_sum = 0.0  # seconds
+        self.latency_count = 0
+
+    def record_request(self, latency_ms: float, status_code: int):
+        """Record one request; latency is given in milliseconds."""
+        seconds = latency_ms / 1000
+        self.requests_by_status[status_code] = self.requests_by_status.get(status_code, 0) + 1
         if status_code >= 500:
             self.error_count += 1
-    
-    def get_metrics(self) -> Dict[str, Any]:
-        """Get current metrics."""
-        if not self.latencies:
-            return {}
-        
-        sorted_latencies = sorted(self.latencies[-100:])  # Keep last 100
-        return {
-            "http_requests_total": self.request_count,
-            "http_errors_total": self.error_count,
-            "http_request_duration_avg": self.total_latency / self.request_count,
-            "http_request_duration_p50": sorted_latencies[len(sorted_latencies) // 2],
-            "http_request_duration_p99": sorted_latencies[int(len(sorted_latencies) * 0.99)],
-        }
+        self.latency_sum += seconds
+        self.latency_count += 1
+        for i, bound in enumerate(LATENCY_BUCKETS):
+            if seconds <= bound:
+                self.bucket_counts[i] += 1
+
+    def render(self) -> str:
+        """Render metrics in Prometheus text format."""
+        lines = [
+            "# HELP http_requests_total Total HTTP requests",
+            "# TYPE http_requests_total counter",
+        ]
+        for status, count in sorted(self.requests_by_status.items()):
+            lines.append(f'http_requests_total{{status="{status}"}} {count}')
+        lines += [
+            "",
+            "# HELP http_errors_total Total HTTP errors",
+            "# TYPE http_errors_total counter",
+            f"http_errors_total {self.error_count}",
+            "",
+            "# HELP http_request_duration_seconds Request latency in seconds",
+            "# TYPE http_request_duration_seconds histogram",
+        ]
+        for bound, count in zip(LATENCY_BUCKETS, self.bucket_counts):
+            lines.append(f'http_request_duration_seconds_bucket{{le="{bound}"}} {count}')
+        lines += [
+            f'http_request_duration_seconds_bucket{{le="+Inf"}} {self.latency_count}',
+            f"http_request_duration_seconds_sum {self.latency_sum}",
+            f"http_request_duration_seconds_count {self.latency_count}",
+        ]
+        return "\n".join(lines) + "\n"
 
 
 # Initialize components
@@ -213,25 +234,7 @@ class SimpleWSGIApp:
     @traced
     def get_metrics(self) -> tuple:
         """Export metrics in Prometheus text format."""
-        metrics_data = metrics_collector.get_metrics()
-        
-        lines = [
-            "# HELP http_requests_total Total HTTP requests",
-            "# TYPE http_requests_total counter",
-            f"http_requests_total {metrics_data.get('http_requests_total', 0)}",
-            "",
-            "# HELP http_errors_total Total HTTP errors",
-            "# TYPE http_errors_total counter",
-            f"http_errors_total {metrics_data.get('http_errors_total', 0)}",
-            "",
-            "# HELP http_request_duration_seconds Request latency in seconds",
-            "# TYPE http_request_duration_seconds histogram",
-            f"http_request_duration_seconds{{quantile=\"0.5\"}} {metrics_data.get('http_request_duration_p50', 0)}",
-            f"http_request_duration_seconds{{quantile=\"0.99\"}} {metrics_data.get('http_request_duration_p99', 0)}",
-        ]
-        
-        body = "\n".join(lines)
-        return 200, "OK", body
+        return 200, "OK", metrics_collector.render()
     
     @traced
     def trigger_error(self) -> tuple:

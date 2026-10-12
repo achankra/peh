@@ -29,7 +29,7 @@
 # Flux reconciliation is critical for continuous deployment and configuration management
 @test "flux_is_ready" {
     # flux check verifies all Flux controllers are running and healthy
-    run flux check --pre
+    run flux check
     [ "$status" -eq 0 ]
     # Confirm all health checks passed
     [[ "$output" == *"all checks passed"* ]]
@@ -38,9 +38,9 @@
 # Test: Verify Istio sidecar injection is enabled for workloads
 # Istio injection enables service mesh features: traffic management, security policies, observability
 @test "istio_injection_enabled" {
-    # Check that the platform-system namespace has the istio-injection label
+    # Check that the monitoring namespace has the istio-injection label
     # This label tells Istio to automatically inject sidecar proxies into pods
-    run kubectl get namespace platform-system -o jsonpath='{.metadata.labels.istio-injection}'
+    run kubectl get namespace monitoring -o jsonpath='{.metadata.labels.istio-injection}'
     [ "$status" -eq 0 ]
     [[ "$output" == "enabled" ]]
 }

@@ -20,7 +20,7 @@ import subprocess
 import sys
 import argparse
 from typing import Dict, List, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
 
@@ -218,7 +218,7 @@ class KPICollector:
             "get",
             "events",
             f"--namespace={self.namespace}",
-            "--sort-by='.lastTimestamp'",
+            "--sort-by=.lastTimestamp",
             "-o",
             "jsonpath={.items[*].reason}"
         ]
@@ -252,7 +252,7 @@ class KPICollector:
         print("=" * 70 + "\n")
 
         self.kpis = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "namespace": self.namespace,
             "metrics": {
                 "deployment_frequency": self.collect_deployment_frequency(),

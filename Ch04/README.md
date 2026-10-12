@@ -59,7 +59,7 @@ This section maps each code file to specific sections, concepts, and listings in
 
 **Key Features:**
 - `StructuredLogger` class: JSON-formatted logs with context
-- `MetricsCollector` class: In-memory metrics storage with percentile calculation
+- `MetricsCollector` class: In-memory metrics storage that renders `http_requests_total{status}` and an `http_request_duration_seconds` histogram (buckets from 5ms to 5s) in Prometheus text format
 - `@traced` decorator: Automatic span creation for functions
 - `SimpleWSGIApp` class: HTTP application with endpoints for health, data, metrics, error simulation
 - Raw HTTP server implementation (no external dependencies required)
@@ -269,6 +269,7 @@ python3 test-observability.py TestOTELCollector
 **Usage:**
 ```bash
 # Install dependencies
+python3 -m venv venv && source venv/bin/activate   
 pip install prometheus-client
 brew install trivy          # macOS; see https://trivy.dev for Linux/Windows
 
@@ -538,7 +539,7 @@ kubectl get nodes                       # Verify node(s) are Ready
 # Install Prometheus + Grafana
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
-helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --namespace monitoring --create-namespace --wait
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --version 92.1.1 --namespace monitoring --create-namespace --wait
 
 ```
 
@@ -549,8 +550,8 @@ helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --
 - **Docker/Container Runtime** - For running OTEL Collector in containers
 
 ### External Services
-- **Prometheus 2.30+** - For metrics scraping and storage
-- **Grafana 8.0+** - For dashboard visualization and alerting
+- **Prometheus** (kube-prometheus-stack chart 92.1.1) - For metrics scraping and storage
+- **Grafana** (bundled with kube-prometheus-stack chart 92.1.1) - For dashboard visualization and alerting
 - **Jaeger** - For distributed trace storage and visualization (optional but recommended)
 - **Loki** - For log aggregation (optional)
 
@@ -621,7 +622,7 @@ The observability stack requires Prometheus and Grafana running in-cluster. Depl
 # Deploy kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
-helm install monitoring prometheus-community/kube-prometheus-stack \
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --version 92.1.1 \
   --namespace monitoring --create-namespace
 
 # Wait for pods to be ready (1-2 minutes)
@@ -629,10 +630,10 @@ kubectl get pods -n monitoring
 
 # Port-forward Prometheus and Grafana for local access
 kubectl port-forward -n monitoring svc/prometheus-operated 9090:9090 &
-kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80 &
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80 &
 
 # Retrieve the Grafana admin password
-kubectl get secret monitoring-grafana -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d; echo
+kubectl get secret kube-prometheus-stack-grafana -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d; echo
 ```
 
 Open [http://localhost:3000](http://localhost:3000) and log in with username `admin` and the password from the command above.
@@ -642,18 +643,18 @@ Open [http://localhost:3000](http://localhost:3000) and log in with username `ad
 **Expected Output:**
 ```
 NAME                                                     READY   STATUS    RESTARTS   AGE
-alertmanager-monitoring-kube-prometheus-alertmanager-0    2/2     Running   0          2m
-monitoring-grafana-xxxxx                                 3/3     Running   0          2m
-monitoring-kube-prometheus-operator-xxxxx                 1/1     Running   0          2m
-monitoring-kube-state-metrics-xxxxx                       1/1     Running   0          2m
-prometheus-monitoring-kube-prometheus-prometheus-0         2/2     Running   0          2m
+alertmanager-kube-prometheus-stack-alertmanager-0    2/2     Running   0          2m
+kube-prometheus-stack-grafana-xxxxx                                 3/3     Running   0          2m
+kube-prometheus-stack-operator-xxxxx                 1/1     Running   0          2m
+kube-prometheus-stack-kube-state-metrics-xxxxx                       1/1     Running   0          2m
+prometheus-kube-prometheus-stack-prometheus-0         2/2     Running   0          2m
 ```
 
 ### Phase 1: Infrastructure Setup (Kubernetes)
 
 If running on Kubernetes, deploy the OTEL Collector first:
 
-> **Note:** The deployment uses `otel/opentelemetry-collector-contrib:0.98.0`. The config uses the `debug` exporter (replaces the deprecated `logging` exporter) and `otlp/jaeger` (replaces the removed native `jaeger` exporter — Jaeger now accepts OTLP natively on port 4317).
+> **Note:** The deployment uses `docker.io/otel/opentelemetry-collector-contrib:0.98.0` (fully qualified so it passes the Gatekeeper allowed-registries policy), and the `observability` namespace carries the `team`, `environment`, and `cost-center` labels that policy requires. The config uses the `debug` exporter (replaces the deprecated `logging` exporter) and `otlp/jaeger` (replaces the removed native `jaeger` exporter — Jaeger now accepts OTLP natively on port 4317).
 
 ```bash
 # Create observability namespace and deploy OTEL Collector
@@ -786,7 +787,7 @@ pip install flask prometheus-client
 python3 metrics_pull.py
 
 # Expected output:
-# WARNING in app.run - Running on http://0.0.0.0:5000
+# WARNING in app.run - Running on http://0.0.0.0:5001
 # Press CTRL+C to quit
 ```
 
@@ -794,11 +795,11 @@ python3 metrics_pull.py
 
 ```bash
 # Generate requests
-curl http://localhost:5000/health
-curl http://localhost:5000/api/items
+curl http://localhost:5001/health
+curl http://localhost:5001/api/items
 
 # View metrics in Prometheus format
-curl http://localhost:5000/metrics
+curl http://localhost:5001/metrics
 ```
 
 **Expected Prometheus metrics output:**
@@ -890,6 +891,8 @@ python3 observability-personas.py --persona security --print | jq '.title'
 
 Configure Grafana with the dashboards and alerts:
 
+> **Note:** If your cluster uses the Istio mesh policies from Chapter 2 (STRICT mTLS plus the `allow-external` allow-list), two things break in the `monitoring` namespace: Grafana's Prometheus datasource fails with `RBAC: access denied`, and Prometheus cannot scrape meshed targets such as kube-state-metrics (HTTP 503), so the Pod and Node panels stay empty. Apply `kubectl apply -f istio-monitoring-authz.yaml` to fix both. The policy also admits the `opencost` namespace (Chapter 12), which must have Istio sidecar injection enabled.
+
 ```bash
 # Open Grafana UI (default: http://localhost:3000)
 # Default credentials: admin / admin
@@ -897,43 +900,59 @@ Configure Grafana with the dashboards and alerts:
 # Via Grafana UI:
 # 1. Navigate to: Dashboards → New → Import
 # 2. Click "Upload JSON file"
-# 3. Select each file from ./dashboards/ directory
+# 3. Select each file from ./dashboards/ directory, plus grafana-dashboard-platform.json
 # 4. Choose Prometheus datasource
 # 5. Import
 
 # Via Grafana API (if automation is desired):
-for dashboard in ./dashboards/*.json; do
-  curl -X POST http://localhost:3000/api/dashboards/db \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer YOUR_API_TOKEN" \
-    -d @"$dashboard"
+# Create a service account token first: Administration → Users and access →
+# Service accounts → Add service account (Editor role) → Add service account token.
+# Grafana shows the token only once, so export it right away:
+#   export PEH_GRAFANA_SERVICE_TOKEN=glsa_...
+# The API expects each dashboard wrapped as {"dashboard": {...}}, so wrap with jq.
+for dashboard in ./dashboards/*.json grafana-dashboard-platform.json; do
+  jq '{dashboard: (. + {id: null}), overwrite: true}' "$dashboard" | \
+    curl -X POST http://localhost:3000/api/dashboards/db \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $PEH_GRAFANA_SERVICE_TOKEN" \
+      -d @-
 done
 ```
 
 ### Phase 9: Configure Alert Rules
 
-Import the alert rules into Prometheus:
+`alert-rules.yaml` is a `PrometheusRule` resource. The Prometheus Operator (part of
+kube-prometheus-stack) watches for these and loads them automatically, so nothing
+is copied into the Prometheus pod:
 
 ```bash
-# Copy alert rules to Prometheus config directory
-cp alert-rules.yaml /etc/prometheus/rules/
+kubectl apply -f alert-rules.yaml
 
-# Reload Prometheus configuration
-curl -X POST http://localhost:9090/-/reload
+# The operator only loads rules whose "release" label matches the Helm release.
+# (the release is named kube-prometheus-stack for the Flux and the helm install alike):
+kubectl get prometheus -n monitoring -o jsonpath='{.items[0].spec.ruleSelector}{"\n"}'
+kubectl label prometheusrule platform-observability-alerts -n monitoring \
+  release=kube-prometheus-stack --overwrite
 
-# Or if running in Kubernetes:
-kubectl create configmap prometheus-rules \
-  --from-file=alert-rules.yaml \
-  -n prometheus \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-# Verify rules are loaded
-curl http://localhost:9090/api/v1/rules | jq '.data.groups[0].rules' | head -20
+# Verify rules are loaded (allow ~30s for the operator to reload)
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 &
+curl -s http://localhost:9090/api/v1/rules | jq '.data.groups[].name'
 ```
 
 ### Phase 10: Generate Load for Testing
 
-Create synthetic traffic to test the full observability stack:
+Create synthetic traffic to test the full observability stack. The instrumented app
+runs on your workstation (port 8000), outside the cluster, so first tell the
+in-cluster Prometheus to scrape it (it reaches your machine as `host.docker.internal`):
+
+```bash
+# Terminal 1: run the app (serves /metrics on :8000)
+python3 instrument-app.py
+
+# Terminal 2: add the scrape target, then confirm it is "up" in Prometheus
+# (Status → Targets, job "platform-app"; allow ~30s for the operator to reload)
+kubectl apply -f prometheus-scrape-host-app.yaml
+```
 
 ```bash
 # Simple load generation script
@@ -963,7 +982,7 @@ Navigate to your dashboards and verify data is flowing:
 
 ```
 1. Open Grafana: http://localhost:3000
-2. Go to: Dashboards → Platform Observability Dashboard
+2. Go to: Dashboards → Platform Health - Chapter 4: Embedding Observability
 3. Verify panels show:
    - Request latency (p50, p95, p99)
    - Error rate trending
@@ -1162,6 +1181,8 @@ grep -o '"expr":"[^"]*' ./dashboards/dashboard-*.json
 | `otel-collector-config.yaml` | YAML | Collector configuration | Ingestion |
 | `otel-collector-deployment.yaml` | YAML | Kubernetes DaemonSet deployment | Infrastructure |
 | `alert-rules.yaml` | YAML | Prometheus alert rules | Incident Response |
+| `prometheus-scrape-host-app.yaml` | YAML | ScrapeConfig so the in-cluster Prometheus scrapes the locally-run app | Infrastructure |
+| `istio-monitoring-authz.yaml` | YAML | Istio policies letting Grafana and Prometheus work under Chapter 2's mesh rules | Infrastructure |
 | `grafana-dashboard-platform.json` | JSON | Sample Grafana dashboard | SPOG Visualization |
 
 ---

@@ -24,8 +24,8 @@ from flask import Flask, request, jsonify
 from audit_logger import AuditLogger
 
 # Configuration
-KUBERNETES_CLUSTER = os.getenv('KUBERNETES_CLUSTER', 'default')
-API_PORT = int(os.getenv('ONBOARDING_API_PORT', 5000))
+KUBERNETES_CLUSTER = os.getenv('KUBERNETES_CLUSTER', 'kind-platform-dev')
+API_PORT = int(os.getenv('ONBOARDING_API_PORT', 5001))
 API_HOST = os.getenv('ONBOARDING_API_HOST', '127.0.0.1')
 DEBUG = os.getenv('ONBOARDING_API_DEBUG', 'False').lower() == 'true'
 
@@ -36,6 +36,12 @@ DEFAULT_QUOTA = {
     'pods': 100,
     'storage': '100Gi'
 }
+
+# Labels required on every team namespace by the Gatekeeper policy
+# `namespace-must-have-team` (team: letters only, environment: dev|staging|prod,
+# cost-center: 4-6 digits)
+DEFAULT_ENVIRONMENT = 'dev'
+DEFAULT_COST_CENTER = '1000'
 
 # In-memory storage (use persistent DB in production)
 teams_db: Dict[str, Dict[str, Any]] = {}
@@ -97,16 +103,23 @@ def validate_email(email: str) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
-def create_kubernetes_namespace(team_id: str, quota: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+def create_kubernetes_namespace(
+    team_id: str,
+    quota: Dict[str, Any],
+    environment: str = DEFAULT_ENVIRONMENT,
+    cost_center: str = DEFAULT_COST_CENTER
+) -> Tuple[bool, Optional[str]]:
     """
     Create a Kubernetes namespace for the team with RBAC and quotas.
-    
+
     This function is idempotent - it won't fail if the namespace already exists.
-    
+
     Args:
         team_id: Team identifier
         quota: Resource quota configuration
-        
+        environment: Value for the `environment` label (dev, staging, prod)
+        cost_center: Value for the `cost-center` label (4-6 digits)
+
     Returns:
         Tuple of (success, error_message)
     """
@@ -120,6 +133,8 @@ def create_kubernetes_namespace(team_id: str, quota: Dict[str, Any]) -> Tuple[bo
             'name': namespace_name,
             'labels': {
                 'team': team_id,
+                'environment': environment,
+                'cost-center': cost_center,
                 'managed-by': 'onboarding-api'
             }
         }
@@ -247,6 +262,32 @@ def create_rbac_for_team(team_id: str, namespace: str) -> bool:
         return False
 
 
+def provision_keycloak_groups(team_id: str, lead: str) -> bool:
+    """
+    Create the team's Keycloak groups (opt-in).
+
+    Runs only when KEYCLOAK_ADMIN_CLIENT_SECRET is set, so Chapter 7 still works
+    without Keycloak. A Keycloak failure is logged but never fails team creation.
+
+    Args:
+        team_id: Team identifier
+        lead: Email of the team lead (added to the admins group)
+
+    Returns:
+        True if the groups were provisioned, False if skipped or failed
+    """
+    if not os.getenv('KEYCLOAK_ADMIN_CLIENT_SECRET'):
+        return False
+
+    try:
+        import keycloak_groups  # imported here: it reads its settings from the environment
+        keycloak_groups.provision_team_groups(team_id, [], lead)
+        return True
+    except Exception as e:
+        logger.warning(f"Keycloak group provisioning failed for {team_id}: {str(e)}")
+        return False
+
+
 @app.route('/teams', methods=['POST'])
 def create_team():
     """
@@ -258,6 +299,8 @@ def create_team():
         "display_name": "Team Display Name",
         "lead": "lead@example.com",
         "description": "Optional team description",
+        "environment": "dev",        # optional: dev, staging or prod (default dev)
+        "cost_center": "1000",       # optional: 4-6 digits (default 1000)
         "resource_quota": {"cpu": "10", "memory": "50Gi", "pods": 100}
     }
     
@@ -312,7 +355,12 @@ def create_team():
         quota = data.get('resource_quota', DEFAULT_QUOTA)
         
         # Create Kubernetes namespace
-        success, error = create_kubernetes_namespace(team_id, quota)
+        success, error = create_kubernetes_namespace(
+            team_id,
+            quota,
+            data.get('environment', DEFAULT_ENVIRONMENT),
+            str(data.get('cost_center', DEFAULT_COST_CENTER))
+        )
         if not success:
             return jsonify({
                 'code': 'NAMESPACE_CREATION_FAILED',
@@ -348,6 +396,9 @@ def create_team():
             }
         ]
         
+        # Optional: mirror the team into Keycloak groups
+        provision_keycloak_groups(team_id, data['lead'])
+
         # Audit log
         audit_logger.log_event(
             action='team_created',

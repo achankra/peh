@@ -14,7 +14,7 @@ metadata:
   name: platform-observability-alerts
   namespace: monitoring
   labels:
-    release: monitoring          # must match kube-prometheus-stack release name
+    release: kube-prometheus-stack   # must match the kube-prometheus-stack Helm release name
     app.kubernetes.io/part-of: kube-prometheus-stack
 spec:
   groups:

@@ -44,6 +44,7 @@ Ch10/
 ├── validate-workflow.py       # End-to-end workflow validation
 ├── dev.py                     # Development helper (also ships in skeleton)
 ├── load-secrets.sh            # Bitwarden credential loader
+├── .env_example               # Fallback env template (copy to .env)
 └── README.md                  # This file
 ```
 
@@ -81,6 +82,7 @@ Ch10/
 | File | Purpose |
 |------|---------|
 | **load-secrets.sh** | Retrieves `BACKSTAGE_URL` and `BACKSTAGE_TOKEN` from Bitwarden vault. Sources `bw-helper.sh` from Ch01. |
+| **.env_example** | Template for a gitignored `.env` holding `BACKSTAGE_URL`, `BACKSTAGE_TOKEN`, and `GITHUB_TOKEN` when you are not using Bitwarden. |
 
 ## Prerequisites
 
@@ -120,7 +122,8 @@ npm >= 9.0.0
 ### Python Dependencies
 
 ```bash
-pip install --break-system-packages pyyaml requests pytest
+python3 -m venv venv && source venv/bin/activate
+pip install pyyaml requests pytest
 ```
 
 ### Backstage Setup
@@ -145,11 +148,11 @@ export BW_SESSION=$(bw unlock --raw)
 source load-secrets.sh
 ```
 
-Or set manually:
+Or copy the template to a gitignored `.env`, edit it, and load it into your shell (same pattern as Chapter 6):
 
 ```bash
-export BACKSTAGE_URL=http://localhost:7007
-export BACKSTAGE_TOKEN=<your-backstage-api-token>
+cp .env_example .env      # then edit .env (BACKSTAGE_TOKEN only if your Backstage has auth enabled)
+set -a && source .env && set +a
 ```
 
 ## Step-by-Step Instructions
@@ -197,7 +200,7 @@ The platformMetadata block in package.json tracks which template version generat
 #### Step 2.1: Run Structural Tests
 
 ```bash
-pytest test_templates.py -v -k 'Structure'
+python -m pytest test_templates.py -v -k 'Structure'
 ```
 
 Structural tests verify: template.yaml is valid Backstage YAML (correct apiVersion, kind, parameters, steps), and all required skeleton files exist (Dockerfile, README.md, package.json, tsconfig.json, CI workflow for backend templates).
@@ -207,7 +210,7 @@ Structural tests verify: template.yaml is valid Backstage YAML (correct apiVersi
 These tests copy the skeleton, substitute variables, and run npm install/build/lint:
 
 ```bash
-pytest test_templates.py -v -k 'Generation'
+python -m pytest test_templates.py -v -k 'Generation'
 ```
 
 Generation tests require Node.js and take longer. They catch issues like broken template syntax, missing dependencies, or linting failures.
@@ -228,14 +231,21 @@ publish.py has three stages: discover_templates() finds every template.yaml, val
 python3 publish.py --local
 ```
 
-The `--local` flag deploys a lightweight pod inside the Kind cluster to serve template.yaml, then registers the template with Backstage using the in-cluster Service URL.
+The `--local` flag deploys a lightweight nginx pod (`template-server`, in the `backstage` namespace) to serve each `template.yaml`, then registers the template with Backstage using the in-cluster Service URL. No GitHub repository or token is needed.
 
-Expected output:
+The first run also adds the server's host to `backend.reading.allow` in Backstage's app-config (Backstage only fetches from allow-listed hosts) and restarts Backstage, so it takes a minute longer. The server pod sets resource limits and uses a fully qualified image name because the Gatekeeper policies from earlier chapters reject pods without them.
+
+Expected output (later runs skip the allow-list update and the restart):
 ```
+Updated URL reader allow-list in backstage-app-config
+Restarting deployment/backstage... done
 Deploying template server in cluster... ready
+Publishing templates from the in-cluster template server...
 Published backend-service/v1
 Waiting for Backstage to ingest template... ready!
 ```
+
+`--local` serves only `template.yaml`, which is enough for the template to appear on the Create page. Running the scaffolder end to end also needs the `skeleton/` files and the `publish:github` step, so that part needs a GitHub repository and token (`GITHUB_REPO`, `GITHUB_TOKEN`, `python3 publish.py --setup-github`).
 
 Use `--refresh --local` to remove previously registered templates and re-publish:
 ```bash
@@ -330,6 +340,10 @@ If ports are already in use (Kind uses port 8080 for its control-plane):
 # Use a different host port
 sed -i 's/"8080:8080"/"8081:8080"/g' docker-compose.yml
 ```
+
+## Known Issues
+
+> **TODO (to be fixed):** the `create-namespace` step in `templates/backend-service/v1/template.yaml` calls `POST /api/onboarding/v1/namespaces`, which the Chapter 7 onboarding API does not provide. Chapter 7 exposes `POST /teams` (port 5001), which creates the team namespace as `team-<name>`. Until this is reconciled, that scaffolder step fails when run against the Chapter 7 API. The "Chapter 7" references to Backstage in this README also refer to the developer portal, which is Chapter 6.
 
 ## Related Chapters
 

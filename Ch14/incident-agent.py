@@ -16,6 +16,7 @@ Features:
 
 import json
 import time
+import uuid
 from dataclasses import dataclass, asdict, field
 from typing import List, Dict, Optional
 from enum import Enum
@@ -222,7 +223,13 @@ class DiagnosisAgent:
         
         elif triage.incident_type == IncidentType.APPLICATION:
             return self._diagnose_application(alert_message)
-        
+
+        elif triage.incident_type == IncidentType.SECURITY:
+            return self._diagnose_security(alert_message)
+
+        elif triage.incident_type == IncidentType.NETWORK:
+            return self._diagnose_network(alert_message)
+
         # Fallback generic diagnosis
         return DiagnosisResult(
             root_cause="Unknown - requires investigation",
@@ -293,6 +300,35 @@ class DiagnosisAgent:
             ]
         )
     
+    def _diagnose_security(self, message: str) -> DiagnosisResult:
+        """Diagnose security incidents."""
+        return DiagnosisResult(
+            root_cause="Unauthorized access - possible compromised credentials",
+            affected_component="authentication layer",
+            confidence=0.80,
+            evidence=["Unauthorized access attempt", "Access pattern not recognized"],
+            remediation_options=[
+                "Block source IP and rotate credentials",
+                "Review authentication and audit logs",
+                "Isolate affected systems",
+                "Notify security team"
+            ]
+        )
+
+    def _diagnose_network(self, message: str) -> DiagnosisResult:
+        """Diagnose network issues."""
+        return DiagnosisResult(
+            root_cause="Network connectivity or DNS failure",
+            affected_component="network",
+            confidence=0.70,
+            evidence=["Connection timeouts", "Endpoints unreachable"],
+            remediation_options=[
+                "Check DNS resolution and connectivity",
+                "Review network policies and firewall rules",
+                "Fail over to healthy network path"
+            ]
+        )
+
     def _diagnose_application(self, message: str) -> DiagnosisResult:
         """Diagnose application issues."""
         return DiagnosisResult(
@@ -314,9 +350,13 @@ class RemediationAgent:
     """
     Proposes and executes remediation actions.
     
-    For critical actions, requires human approval.
+    For critical actions, or when the diagnosis is a low-confidence guess,
+    requires human approval.
     """
-    
+
+    # Below this diagnosis confidence, a human must approve before anything runs
+    LOW_CONFIDENCE = 0.5
+
     def __init__(self):
         """Initialize remediation agent."""
         self.proposed_actions: List[RemediationAction] = []
@@ -342,7 +382,9 @@ class RemediationAgent:
         
         # Determine action characteristics
         risk_level = "high" if triage.severity == SeverityLevel.CRITICAL else "medium"
-        requires_approval = risk_level == "high"
+        requires_approval = (
+            risk_level == "high" or diagnosis.confidence < self.LOW_CONFIDENCE
+        )
         
         action_type = self._map_to_action_type(option)
         target = diagnosis.affected_component
@@ -350,7 +392,7 @@ class RemediationAgent:
         duration = self._estimate_duration(action_type)
         
         action = RemediationAction(
-            action_id=f"action-{int(time.time())}",
+            action_id=f"action-{uuid.uuid4().hex[:8]}",
             description=option,
             action_type=action_type,
             target=target,
@@ -411,7 +453,7 @@ class IncidentAgent:
         Returns:
             Complete incident response
         """
-        incident_id = f"inc-{int(time.time())}"
+        incident_id = f"inc-{uuid.uuid4().hex[:8]}"
         incident = IncidentResponse(
             incident_id=incident_id,
             alert_message=alert_message,
@@ -469,7 +511,7 @@ class IncidentAgent:
             result_message = f"Rolled back to previous version"
         
         duration = time.time() - start_time
-        incident.resolution_time = incident.created_at + duration
+        incident.resolution_time = time.time() - incident.created_at
         
         incident.execution_result = {
             'success': success,
@@ -510,6 +552,8 @@ def main():
             print(f"  Type: {t.incident_type.value}")
             print(f"  Confidence: {t.confidence:.1%}")
             print(f"  Initial Action: {t.initial_action}")
+            if t.requires_escalation:
+                print(f"  ESCALATION REQUIRED")
         
         # Diagnosis
         if incident.diagnosis:

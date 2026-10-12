@@ -14,6 +14,7 @@ This system converts them into executable automation with safeguards.
 
 import json
 import re
+import uuid
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
 from enum import Enum
@@ -50,7 +51,7 @@ class RunbookExecution:
     started_at: float
     completed_at: Optional[float]
     steps_executed: List[Dict]
-    status: str  # running, success, failed, cancelled
+    status: str  # running, success, failed, pending_approval, cancelled
     approval_required: bool
     error_message: Optional[str]
 
@@ -211,22 +212,24 @@ class SafetyValidator:
             Tuple of (is_safe, list of warnings)
         """
         warnings = []
-        
-        # Check command
+
+        # Match whole words, so "pg_dump --format" does not trip on "rm"
         command_lower = step.command.lower()
-        
-        # Detect dangerous commands
-        for keyword in SafetyValidator.DANGEROUS_KEYWORDS:
-            if keyword in command_lower:
-                if step.step_type == StepType.ACTION and not step.requires_approval:
-                    warnings.append(
-                        f"Dangerous action '{keyword}' requires approval"
-                    )
-                    return False, warnings
-        
+        words = set(re.findall(r'[a-z0-9]+', command_lower))
+
+        # Detect dangerous commands. The declared step type is chosen by the
+        # runbook author, so it is not trusted: every step except a
+        # notification (whose command is just message text) is checked.
+        if step.step_type != StepType.NOTIFICATION and not step.requires_approval:
+            for keyword in sorted(SafetyValidator.DANGEROUS_KEYWORDS & words):
+                warnings.append(
+                    f"Dangerous action '{keyword}' requires approval"
+                )
+                return False, warnings
+
         # Require approval for state-changing actions
         if step.step_type == StepType.ACTION and not step.requires_approval:
-            if not any(safe in command_lower for safe in SafetyValidator.SAFE_KEYWORDS):
+            if not (SafetyValidator.SAFE_KEYWORDS & words):
                 warnings.append("Non-readonly action should require approval")
         
         # Check timeout
@@ -239,7 +242,7 @@ class SafetyValidator:
         
         # Check rollback for destructive actions
         if step.step_type == StepType.ACTION and not step.rollback_action:
-            if any(keyword in command_lower for keyword in SafetyValidator.DANGEROUS_KEYWORDS):
+            if SafetyValidator.DANGEROUS_KEYWORDS & words:
                 warnings.append("Destructive action without rollback procedure")
         
         is_safe = len(warnings) == 0
@@ -273,7 +276,7 @@ class RunbookExecutor:
         """
         import time
         
-        execution_id = f"exec-{int(time.time())}"
+        execution_id = f"exec-{uuid.uuid4().hex[:8]}"
         execution = RunbookExecution(
             execution_id=execution_id,
             runbook_name=runbook_name,
@@ -295,6 +298,12 @@ class RunbookExecutor:
             step_result = self._execute_step(step, auto_approve and step.step_type == StepType.DIAGNOSTIC)
             execution.steps_executed.append(step_result)
             
+            if step_result.get('pending_approval'):
+                # Not a failure: the run is paused until a human approves
+                execution.status = "pending_approval"
+                execution.error_message = step_result.get('error')
+                break
+
             if not step_result['success']:
                 execution.status = "failed"
                 execution.error_message = step_result.get('error')
@@ -338,6 +347,7 @@ class RunbookExecutor:
         # Check approval
         if step.requires_approval and not auto_approve:
             result['error'] = "Awaiting approval"
+            result['pending_approval'] = True
             self.approval_queue.append(step)
             return result
         
@@ -516,7 +526,12 @@ def main():
     print(f"Successful steps: {successful}/{len(execution.steps_executed)}")
     
     for step_result in execution.steps_executed:
-        status = "✓" if step_result['success'] else "✗"
+        if step_result['success']:
+            status = "✓"
+        elif step_result.get('pending_approval'):
+            status = "⏸"
+        else:
+            status = "✗"
         print(f"\n{status} {step_result['step_id']}: {step_result['name']}")
         if step_result.get('output'):
             print(f"   Output: {step_result['output']}")

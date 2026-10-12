@@ -162,9 +162,9 @@ class KindClusterManager:
                 ),
                 spec=k8s.core.v1.ResourceQuotaSpecArgs(
                     hard={
-                        "requests.cpu": "2",
+                        "requests.cpu": "3",
                         "requests.memory": "4Gi",
-                        "limits.cpu": "4",
+                        "limits.cpu": "8",
                         "limits.memory": "8Gi",
                         "pods": "20",
                     },

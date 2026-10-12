@@ -463,35 +463,37 @@ if __name__ == '__main__':
                 else:
                     print(f"Error: {error}")
             else:
-                print("Usage: permission-delegation.py grant-role <team> <email> <role>")
+                print("Usage: permission_delegation.py grant-role <team> <email> <role>")
         
         elif command == 'grant':
-            # Grant a permission: grant <team> <email> <permission>
+            # Grant a permission: grant <team> <email> <permission> [granted_by]
             if len(sys.argv) >= 5:
                 team = sys.argv[2]
                 email = sys.argv[3]
                 perm = sys.argv[4]
-                success, error = manager.grant_permission(team, email, perm, 'admin@example.com')
+                actor = sys.argv[5] if len(sys.argv) >= 6 else 'admin@example.com'
+                success, error = manager.grant_permission(team, email, perm, actor)
                 if success:
                     print(f"Granted {perm} to {email}")
                 else:
                     print(f"Error: {error}")
             else:
-                print("Usage: permission-delegation.py grant <team> <email> <permission>")
+                print("Usage: permission_delegation.py grant <team> <email> <permission> [granted_by]")
         
         elif command == 'revoke':
-            # Revoke a permission: revoke <team> <email> <permission>
+            # Revoke a permission: revoke <team> <email> <permission> [revoked_by]
             if len(sys.argv) >= 5:
                 team = sys.argv[2]
                 email = sys.argv[3]
                 perm = sys.argv[4]
-                success, error = manager.revoke_permission(team, email, perm, 'admin@example.com')
+                actor = sys.argv[5] if len(sys.argv) >= 6 else 'admin@example.com'
+                success, error = manager.revoke_permission(team, email, perm, actor)
                 if success:
                     print(f"Revoked {perm} from {email}")
                 else:
                     print(f"Error: {error}")
             else:
-                print("Usage: permission-delegation.py revoke <team> <email> <permission>")
+                print("Usage: permission_delegation.py revoke <team> <email> <permission> [revoked_by]")
         
         elif command == 'check':
             # Check permission: check <team> <email> <permission>
@@ -502,7 +504,7 @@ if __name__ == '__main__':
                 has_it = manager.has_permission(team, email, perm)
                 print(f"{email} has {perm}: {has_it}")
             else:
-                print("Usage: permission-delegation.py check <team> <email> <permission>")
+                print("Usage: permission_delegation.py check <team> <email> <permission>")
         
         elif command == 'list-member':
             # List member permissions: list-member <team> <email>
@@ -514,7 +516,7 @@ if __name__ == '__main__':
                 for perm in perms:
                     print(f"  - {perm}")
             else:
-                print("Usage: permission-delegation.py list-member <team> <email>")
+                print("Usage: permission_delegation.py list-member <team> <email>")
         
         elif command == 'list-roles':
             # List available roles and permissions

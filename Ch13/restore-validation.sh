@@ -119,7 +119,9 @@ show_help() {
 # ============================================================================
 
 get_latest_backup() {
-    local latest=$(velero backup get -n "$VELERO_NAMESPACE" -o json | \
+    # kubectl always returns a list; `velero backup get -o json` returns a bare
+    # object when exactly one backup exists
+    local latest=$(kubectl get backups.velero.io -n "$VELERO_NAMESPACE" -o json | \
         jq -r '.items | sort_by(.metadata.creationTimestamp) | reverse | .[0].metadata.name')
 
     if [ -z "$latest" ] || [ "$latest" = "null" ]; then
@@ -135,7 +137,7 @@ validate_backup_exists() {
 
     print_info "Validating backup exists: $backup_name"
 
-    local phase=$(velero backup get "$backup_name" -n "$VELERO_NAMESPACE" \
+    local phase=$(kubectl get backup "$backup_name" -n "$VELERO_NAMESPACE" \
         -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
 
     if [ -z "$phase" ]; then
@@ -163,11 +165,20 @@ create_test_namespace() {
         sleep 5
     fi
 
-    kubectl create namespace "$namespace"
-    kubectl label namespace "$namespace" \
-        restore-test="true" \
-        created-at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --overwrite
+    # team/environment/cost-center satisfy the Ch11 Gatekeeper namespace-must-have-team policy
+    kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${namespace}
+  labels:
+    restore-test: "true"
+    team: platform
+    environment: dev
+    cost-center: "10001"
+  annotations:
+    created-at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+EOF
 
     print_success "Test namespace created: $namespace"
 }
@@ -209,13 +220,23 @@ perform_restore() {
         restore_cmd+=("--namespace-mappings" "$mappings")
     fi
 
-    if ! velero "${restore_cmd[@]}"; then
+    if ! "${restore_cmd[@]}"; then
         print_error "Failed to create restore: $restore_name"
         return 1
     fi
 
-    print_success "Restore completed: $restore_name"
     RESTORE_END_TIME=$(date +%s)
+
+    # `velero restore create --wait` exits 0 even when the restore PartiallyFailed
+    local restore_phase=$(kubectl get restore "$restore_name" -n "$VELERO_NAMESPACE" \
+        -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+
+    if [ "$restore_phase" != "Completed" ]; then
+        print_error "Restore $restore_name ended in phase '${restore_phase:-unknown}' (check: velero restore describe $restore_name)"
+        return 1
+    fi
+
+    print_success "Restore completed: $restore_name"
 
     return 0
 }
@@ -267,7 +288,7 @@ wait_for_pod_readiness() {
 
     # Wait for deployments if they exist
     if kubectl get deployments -n "$namespace" 2>/dev/null | grep -q .; then
-        if timeout $max_wait kubectl rollout status deployment \
+        if kubectl rollout status deployment \
             -n "$namespace" \
             --timeout="${max_wait}s" 2>&1; then
             ready=true
@@ -543,6 +564,13 @@ main() {
 
     # Execute validation workflow
     validate_backup_exists "$BACKUP_NAME" || exit 1
+
+    if [ "$DRY_RUN" = true ]; then
+        print_info "[DRY-RUN] Would create namespace: $TARGET_NAMESPACE"
+        print_info "[DRY-RUN] Would restore backup $BACKUP_NAME${VALIDATE_NAMESPACES:+ (namespaces: $VALIDATE_NAMESPACES)}"
+        print_info "[DRY-RUN] Would validate resources, readiness and RTO (target ${RTO_TARGET_SECONDS}s), then clean up"
+        exit 0
+    fi
 
     create_test_namespace "$TARGET_NAMESPACE" || exit 1
 

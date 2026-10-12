@@ -27,7 +27,7 @@ class KindClusterConfig:
     
     Attributes:
         cluster_name: Name of the Kind cluster
-        kubernetes_version: Kubernetes version (e.g., "1.27.0")
+        kubernetes_version: Kubernetes version (e.g., "1.37.0")
         num_worker_nodes: Number of worker nodes in addition to control plane
         api_server_port: Port for Kubernetes API server (default: 6443)
         enable_ingress: Deploy Nginx Ingress Controller
@@ -40,7 +40,7 @@ class KindClusterConfig:
         extra_mounts: Additional volume mounts for nodes
     """
     cluster_name: str
-    kubernetes_version: str = "1.27.0"
+    kubernetes_version: str = "1.37.0"
     num_worker_nodes: int = 2
     api_server_port: int = 6443
     enable_ingress: bool = True
@@ -349,7 +349,7 @@ def create_dev_cluster() -> KindClusterManager:
     
     Development cluster has:
     - 1 control plane + 2 worker nodes
-    - Kubernetes 1.27.0
+    - Kubernetes 1.37.0
     - Ingress enabled
     - Metrics server enabled
     
@@ -360,7 +360,7 @@ def create_dev_cluster() -> KindClusterManager:
 
     cluster_config = KindClusterConfig(
         cluster_name="platform-dev",
-        kubernetes_version="1.27.0",
+        kubernetes_version="1.37.0",
         num_worker_nodes=2,
         enable_ingress=True,
         enable_metrics_server=True,
@@ -382,7 +382,7 @@ def create_prod_cluster() -> KindClusterManager:
     
     Production cluster has:
     - 1 control plane + 3 worker nodes
-    - Kubernetes 1.27.0
+    - Kubernetes 1.37.0
     - All advanced features enabled
     
     Returns:
@@ -392,7 +392,7 @@ def create_prod_cluster() -> KindClusterManager:
 
     cluster_config = KindClusterConfig(
         cluster_name="platform-prod",
-        kubernetes_version="1.27.0",
+        kubernetes_version="1.37.0",
         num_worker_nodes=3,
         enable_ingress=True,
         enable_metrics_server=True,

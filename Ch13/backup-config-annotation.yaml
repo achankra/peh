@@ -6,7 +6,7 @@ metadata:
   labels:
     app: demo-app
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: demo-app
@@ -20,13 +20,13 @@ spec:
       annotations:
         # Pre-backup hook: quiesce database operations
         pre.hook.backup.velero.io/container: database-sidecar
-        pre.hook.backup.velero.io/command: '["/bin/sh", "-c", "echo \"Preparing database for backup...\" && db-quiesce --wait=true && echo \"Database prepared\""]'
+        pre.hook.backup.velero.io/command: '["/bin/sh", "-c", "echo \"Preparing database for backup...\" && redis-cli BGSAVE && echo \"Database prepared\""]'
         pre.hook.backup.velero.io/on-error: Fail
         pre.hook.backup.velero.io/exec-timeout: "5m"
         
         # Post-backup hook: resume database operations
         post.hook.backup.velero.io/container: database-sidecar
-        post.hook.backup.velero.io/command: '["/bin/sh", "-c", "echo \"Resuming database operations...\" && db-resume && echo \"Database resumed\""]'
+        post.hook.backup.velero.io/command: '["/bin/sh", "-c", "echo \"Resuming database operations...\" && redis-cli PING && echo \"Database resumed\""]'
         post.hook.backup.velero.io/on-error: Continue
         post.hook.backup.velero.io/exec-timeout: "2m"
         
@@ -44,10 +44,11 @@ spec:
       containers:
         # Main application container
         - name: app
-          image: demo-app:1.0
+          # Placeholder web server standing in for the demo application
+          image: docker.io/library/nginx:1.27-alpine
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8080
+            - containerPort: 80
               name: http
           
           env:
@@ -58,12 +59,12 @@ spec:
           
           resources:
             requests:
-              cpu: 100m
-              memory: 256Mi
+              cpu: 50m
+              memory: 64Mi
             limits:
-              cpu: 500m
-              memory: 512Mi
-          
+              cpu: 200m
+              memory: 256Mi
+
           volumeMounts:
             - name: data-volume
               mountPath: /app/data
@@ -72,7 +73,7 @@ spec:
         
         # Database sidecar container for backup hooks
         - name: database-sidecar
-          image: redis:7-alpine
+          image: docker.io/library/redis:7-alpine
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 6379
@@ -85,11 +86,11 @@ spec:
           resources:
             requests:
               cpu: 50m
-              memory: 128Mi
+              memory: 64Mi
             limits:
               cpu: 200m
               memory: 256Mi
-          
+
           volumeMounts:
             - name: data-volume
               mountPath: /data
@@ -138,10 +139,10 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: fast-ssd
+  storageClassName: standard
   resources:
     requests:
-      storage: 10Gi
+      storage: 1Gi
 
 ---
 apiVersion: v1
@@ -149,6 +150,8 @@ kind: ConfigMap
 metadata:
   name: demo-app-config
   namespace: default
+  labels:
+    app: demo-app
 data:
   application.properties: |
     app.name=demo-app
@@ -162,3 +165,5 @@ kind: ServiceAccount
 metadata:
   name: demo-app
   namespace: default
+  labels:
+    app: demo-app

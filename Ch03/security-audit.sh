@@ -24,7 +24,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Global variables
-NAMESPACE="${1:-}"
+NAMESPACE=""
 VERBOSE=false
 ISSUES_FOUND=0
 
@@ -42,7 +42,7 @@ print_info() {
 
 print_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
-    ((ISSUES_FOUND++))
+    ISSUES_FOUND=$((ISSUES_FOUND + 1))
 }
 
 print_success() {
@@ -51,7 +51,7 @@ print_success() {
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
-    ((ISSUES_FOUND++))
+    ISSUES_FOUND=$((ISSUES_FOUND + 1))
 }
 
 usage() {
@@ -112,7 +112,7 @@ check_cluster_access() {
         exit 1
     fi
     
-    CLUSTER_VERSION=$(kubectl version --short 2>/dev/null | grep Server | cut -d: -f2 | xargs)
+    CLUSTER_VERSION=$(kubectl version -o json 2>/dev/null | jq -r '.serverVersion.gitVersion')
     print_success "Cluster is accessible - Version: $CLUSTER_VERSION"
 }
 
@@ -135,7 +135,8 @@ audit_rbac_permissions() {
     
     if [[ $admin_count -gt 0 ]]; then
         print_warning "Found $admin_count cluster-admin role bindings"
-        kubectl get clusterrolebindings -o jsonpath='{.items[?(@.roleRef.name=="cluster-admin")].metadata.name}' | tr ' ' '\n' | while read -r binding; do
+        kubectl get clusterrolebindings -o json | \
+            jq -r '.items[] | select(.roleRef.name == "cluster-admin") | .metadata.name' | while read -r binding; do
             print_info "  - $binding"
         done
     else
@@ -164,8 +165,10 @@ audit_service_accounts() {
             local token_secrets=$(kubectl get sa "$sa" -n "$ns" -o jsonpath='{.secrets[*].name}' 2>/dev/null)
             
             if [[ -n "$token_secrets" ]]; then
-                ((sa_with_secrets++))
-                [[ "$VERBOSE" == true ]] && print_info "Service account '$sa' in namespace '$ns' has token secret"
+                sa_with_secrets=$((sa_with_secrets + 1))
+                if [[ "$VERBOSE" == true ]]; then
+                    print_info "Service account '$sa' in namespace '$ns' has token secret"
+                fi
             fi
         done
     done
@@ -191,7 +194,7 @@ audit_pod_security() {
         # Check for privileged pods
         while IFS= read -r pod; do
             if [[ -n "$pod" ]]; then
-                ((pods_privileged++))
+                pods_privileged=$((pods_privileged + 1))
                 print_warning "Pod '$pod' in namespace '$ns' running in privileged mode"
             fi
         done < <(kubectl get pods -n "$ns" -o jsonpath='{.items[?(@.spec.containers[*].securityContext.privileged==true)].metadata.name}' 2>/dev/null)
@@ -199,7 +202,7 @@ audit_pod_security() {
         # Check for pods running as root
         while IFS= read -r pod; do
             if [[ -n "$pod" ]]; then
-                ((pods_root_user++))
+                pods_root_user=$((pods_root_user + 1))
                 print_warning "Pod '$pod' in namespace '$ns' running as root user"
             fi
         done < <(kubectl get pods -n "$ns" -o jsonpath='{.items[?(@.spec.containers[*].securityContext.runAsUser==0)].metadata.name}' 2>/dev/null)
@@ -207,15 +210,15 @@ audit_pod_security() {
         # Check for pods without resource limits
         while IFS= read -r pod; do
             if [[ -n "$pod" ]]; then
-                ((pods_no_limits++))
+                pods_no_limits=$((pods_no_limits + 1))
                 print_warning "Pod '$pod' in namespace '$ns' has no resource limits"
             fi
         done < <(kubectl get pods -n "$ns" -o jsonpath='{.items[?(!@.spec.containers[0].resources.limits)].metadata.name}' 2>/dev/null)
     done
     
-    [[ $pods_privileged -eq 0 ]] && print_success "No privileged pods found"
-    [[ $pods_root_user -eq 0 ]] && print_success "No pods running as root found"
-    [[ $pods_no_limits -eq 0 ]] && print_success "All pods have resource limits"
+    if [[ $pods_privileged -eq 0 ]]; then print_success "No privileged pods found"; fi
+    if [[ $pods_root_user -eq 0 ]]; then print_success "No pods running as root found"; fi
+    if [[ $pods_no_limits -eq 0 ]]; then print_success "All pods have resource limits"; fi
 }
 
 audit_network_policies() {
@@ -278,9 +281,9 @@ audit_rbac_bindings() {
     
     print_success "Found $binding_count role bindings"
     
-    # Check for bindings to system:authenticated group
+    # Check for custom bindings to system:authenticated (skip built-in system:* defaults)
     local auth_bindings=$(kubectl get clusterrolebindings -o json 2>/dev/null | \
-        jq '[.items[] | select(.subjects[]?.name == "system:authenticated")] | length')
+        jq '[.items[] | select(.subjects[]?.name == "system:authenticated") | select(.metadata.name | startswith("system:") | not)] | length')
     
     if [[ $auth_bindings -gt 0 ]]; then
         print_warning "Found $auth_bindings bindings to system:authenticated group"
@@ -295,7 +298,11 @@ main() {
     echo ""
     print_header "Kubernetes Security Audit"
     echo "Timestamp: $(date)"
-    [[ -n "$NAMESPACE" ]] && print_info "Auditing namespace: $NAMESPACE" || print_info "Auditing all namespaces"
+    if [[ -n "$NAMESPACE" ]]; then
+        print_info "Auditing namespace: $NAMESPACE"
+    else
+        print_info "Auditing all namespaces"
+    fi
     echo ""
     
     # Run all audit checks

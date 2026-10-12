@@ -25,4 +25,4 @@ fi
 echo ""
 echo "Chapter 10 environment ready. You can now run:"
 echo "  python3 publish.py"
-echo "  pytest test_templates.py -v -k Structure"
+echo "  python -m pytest test_templates.py -v -k Structure"

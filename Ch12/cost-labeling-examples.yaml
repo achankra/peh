@@ -11,6 +11,7 @@ metadata:
   name: team-checkout
   labels:
     team: checkout
+    environment: dev
     cost-center: "4521"
     business-unit: payments
 
@@ -35,7 +36,9 @@ spec:
     spec:
       containers:
         - name: checkout-api
-          image: myregistry/checkout-api:v1
+          # Placeholder workload: swap in your service image (must come from a
+          # registry the Gatekeeper allowed-registries policy permits).
+          image: registry.k8s.io/pause:3.9
           resources:
             requests:
               cpu: 100m
@@ -43,6 +46,17 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+
+---
+# Namespace for the analytics team (quota and limits: Listings 12.9-12.10 below)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-analytics
+  labels:
+    team: analytics
+    environment: dev
+    cost-center: "4522"
 
 ---
 # Listing 12.6 - Node taint for spot instances
@@ -62,6 +76,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: batch-processor
+  namespace: team-analytics
 spec:
   replicas: 1
   selector:
@@ -89,7 +104,8 @@ spec:
                       - spot
       containers:
         - name: batch-processor
-          image: your-image:latest
+          # Placeholder workload (see checkout-api above)
+          image: registry.k8s.io/pause:3.9
           resources:
             requests:
               cpu: 100m
@@ -100,11 +116,7 @@ spec:
 
 ---
 # Listing 12.9 - ResourceQuota for team namespace
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: team-analytics
----
+# (the team-analytics Namespace is defined above, before its first user)
 apiVersion: v1
 kind: ResourceQuota
 metadata:

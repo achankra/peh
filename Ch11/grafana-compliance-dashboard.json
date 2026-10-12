@@ -15,7 +15,7 @@
         "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
         "targets": [
           {
-            "expr": "increase(gatekeeper_violations_total[5m])",
+            "expr": "sum(gatekeeper_violations)",
             "refId": "A"
           }
         ],
@@ -41,7 +41,7 @@
         "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
         "targets": [
           {
-            "expr": "topk(5, sum by (constraint) (gatekeeper_violations_total))",
+            "expr": "topk(5, sum by (policy) (gatekeeper_violations_by_policy))",
             "refId": "A"
           }
         ],
@@ -60,7 +60,7 @@
         "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
         "targets": [
           {
-            "expr": "topk(10, sum by (namespace) (gatekeeper_violations_total))",
+            "expr": "topk(10, gatekeeper_violations_by_namespace)",
             "legendFormat": "{{namespace}}",
             "refId": "A"
           }
@@ -86,7 +86,7 @@
         "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
         "targets": [
           {
-            "expr": "(count(gatekeeper_constraint_status{status='enforced'}) / count(gatekeeper_constraint_status)) * 100",
+            "expr": "sum(gatekeeper_constraints{enforcement_action='deny',status='active'}) / sum(gatekeeper_constraints{status='active'}) * 100",
             "refId": "A"
           }
         ],

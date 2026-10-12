@@ -8,7 +8,7 @@ audit logging, and approval gates for destructive actions.
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
@@ -21,6 +21,11 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def utc_now() -> str:
+    """Current UTC time as an ISO-8601 string ending in 'Z'."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class ActionType(Enum):
@@ -82,11 +87,13 @@ class Agent(ABC):
         output_data: Dict[str, Any],
         status: str,
         error_message: Optional[str] = None,
-        approval_required: bool = False
+        approval_required: bool = False,
+        approval_status: Optional[str] = None,
+        approval_user: Optional[str] = None
     ) -> AuditLog:
         """Create and log an action."""
         log_entry = AuditLog(
-            timestamp=datetime.utcnow().isoformat() + 'Z',
+            timestamp=utc_now(),
             agent_id=self.agent_id,
             agent_type=self.agent_type,
             action_type=action_type,
@@ -96,7 +103,9 @@ class Agent(ABC):
             output_data=output_data,
             status=status,
             error_message=error_message,
-            approval_required=approval_required
+            approval_required=approval_required,
+            approval_status=approval_status,
+            approval_user=approval_user
         )
         self.audit_logs.append(log_entry)
         self.logger.info(f"{action_type}: {description} - Status: {status}")
@@ -357,13 +366,29 @@ class ExecutionAgent(Agent):
             plan = task.get("plan", {})
             steps = plan.get("steps", [])
             execution_results = []
-            
+            blocked_on_step = None
+
             for step in steps:
                 action = step.get("action", "unknown")
                 severity = step.get("severity", ActionSeverity.READ_ONLY.value)
-                
+
+                # Later steps depend on earlier ones, so nothing runs past an
+                # unapproved step
+                if blocked_on_step is not None:
+                    self.logger.warning(
+                        f"Step {step['step']} skipped: {action} "
+                        f"(blocked on step {blocked_on_step})"
+                    )
+                    execution_results.append({
+                        "step": step["step"],
+                        "status": "skipped",
+                        "reason": f"blocked on unapproved step {blocked_on_step}"
+                    })
+                    continue
+
                 # Check if approval is required
                 if step.get("requires_approval"):
+                    blocked_on_step = step["step"]
                     self.logger.warning(f"Step {step['step']} requires approval: {action}")
                     self.log_action(
                         action_type="execution",
@@ -399,10 +424,11 @@ class ExecutionAgent(Agent):
                 "plan_id": plan.get("plan_id"),
                 "steps_executed": len([r for r in execution_results if r.get("status") == "completed"]),
                 "steps_waiting_approval": len([r for r in execution_results if r.get("status") == "waiting_for_approval"]),
+                "steps_skipped": len([r for r in execution_results if r.get("status") == "skipped"]),
                 "results": execution_results,
-                "timestamp": datetime.utcnow().isoformat() + 'Z'
+                "timestamp": utc_now()
             }
-        
+
         except Exception as e:
             error_msg = str(e)
             self.log_action(
@@ -453,7 +479,7 @@ class SupervisorAgent(Agent):
         
         workflow_result = {
             "workflow_id": f"workflow-{uuid.uuid4().hex[:8]}",
-            "timestamp": datetime.utcnow().isoformat() + 'Z',
+            "timestamp": utc_now(),
             "steps": {}
         }
         
@@ -529,8 +555,14 @@ class SupervisorAgent(Agent):
             workflow_result["steps"]["execution"] = execution_result
             
             # Final status
-            workflow_result["status"] = "completed"
-            self.logger.info("Remediation workflow completed successfully")
+            if execution_result.get("steps_waiting_approval"):
+                workflow_result["status"] = "pending_approval"
+                self.logger.warning(
+                    "Remediation workflow paused: waiting for human approval"
+                )
+            else:
+                workflow_result["status"] = "completed"
+                self.logger.info("Remediation workflow completed successfully")
         
         except Exception as e:
             error_msg = str(e)
@@ -568,7 +600,7 @@ class SupervisorAgent(Agent):
         return {
             "approved": True,
             "approved_by": "system-admin",
-            "timestamp": datetime.utcnow().isoformat() + 'Z',
+            "timestamp": utc_now(),
             "reason": "Auto-approved for demo purposes"
         }
     

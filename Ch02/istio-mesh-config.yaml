@@ -89,7 +89,7 @@ spec:
     # Allow authenticated external traffic
     - from:
         - source:
-            principals: ["cluster.local/ns/application/sa/*/"]
+            principals: ["cluster.local/ns/application/sa/*"]
       to:
         - operation:
             methods: ["GET", "POST", "PUT", "DELETE"]

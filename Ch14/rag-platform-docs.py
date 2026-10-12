@@ -5,10 +5,12 @@ RAG Platform Documentation System.
 Implements Retrieval-Augmented Generation for platform documentation:
 - Indexes markdown documentation into a searchable format
 - Retrieves relevant context for user queries
-- Optionally augments responses with LLM summarization
+- Answers from keyword templates (no LLM is called)
 
 This demo uses TF-IDF for retrieval. Production systems would use embeddings
-(Anthropic Claude, local BERT, etc.) for semantic similarity.
+(Anthropic Claude, local BERT, etc.) for semantic similarity, and an LLM to
+synthesize answers. For an LLM-backed pipeline, see
+platform_chatbot/rag_pipeline.py.
 """
 
 import os
@@ -394,14 +396,10 @@ def create_sample_docs() -> List[Document]:
 
 def main():
     """Demonstrate RAG system."""
-    has_api_key = bool(os.getenv("ANTHROPIC_API_KEY"))
     print("=" * 70)
     print("RAG Platform Documentation System Demo")
-    if has_api_key:
-        print("  MODE: LIVE — ANTHROPIC_API_KEY detected (LLM-augmented answers)")
-    else:
-        print("  MODE: MOCK — Using TF-IDF retrieval only (no LLM augmentation)")
-        print("  Tip:  export ANTHROPIC_API_KEY=sk-ant-... for LLM-powered answers")
+    print("  MODE: TF-IDF retrieval + template answers (no LLM, no API key needed)")
+    print("  Tip:  for LLM-powered answers, run platform_chatbot/rag_pipeline.py")
     print("=" * 70)
     
     # Create and initialize system

@@ -24,6 +24,11 @@ spec:
       - quay.io/my-org/
       - docker.io/library/  # Official Docker Hub images only
       - k8s.gcr.io/
+      # TODO(ch11): added for Chapter 9 (Crossplane, providers, functions). Not validated
+      # against a live cluster: K8sRestrictImageRegistries was not installed when this was
+      # added. Review with the rest of Chapter 11 (also: this constraint is dryrun, unlike
+      # the enforcing allowed-registries in Ch02/platform-services.yaml).
+      - xpkg.crossplane.io/
 
     # Allow Docker Hub implicit registry (docker.io)
     allowUndeclaredRegistries: false

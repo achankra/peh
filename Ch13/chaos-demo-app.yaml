@@ -1,0 +1,52 @@
+# Target workload for the chaos experiments (Step 3.2)
+#
+# Equivalent to `kubectl create deployment demo-app --image=nginx:alpine --replicas=3`
+# but with the namespace labels, docker.io/ image prefix and resource limits that the
+# Ch11 Gatekeeper policies require. The container is named `nginx` and the pods are
+# labelled app=demo-app because the chaos experiments select on both.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chaos-testing
+  labels:
+    team: platform
+    environment: dev
+    cost-center: "10001"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  namespace: chaos-testing
+  labels:
+    app: demo-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: demo-app
+  template:
+    metadata:
+      labels:
+        app: demo-app
+    spec:
+      containers:
+        - name: nginx
+          image: docker.io/library/nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi

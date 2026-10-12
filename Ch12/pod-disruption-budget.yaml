@@ -15,11 +15,6 @@ spec:
   
   # Allow disruption only when all other pods are available
   unhealthyPodEvictionPolicy: AlwaysAllow
-  
-  # Policies for different disruption types
-  disruptionBudgetPolicy:
-    - type: node-drain
-    - type: node-failure
 
 ---
 apiVersion: policy/v1
@@ -105,7 +100,17 @@ spec:
       # Pod disruption budget acknowledgment
       containers:
         - name: app
-          image: myapp:1.0
+          # Placeholder image: swap in your service (must come from a registry the
+          # Gatekeeper allowed-registries policy permits). The policy also requires
+          # cpu and memory limits.
+          image: docker.io/library/nginx:1.27
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
           lifecycle:
             preStop:
               exec:
@@ -141,4 +146,11 @@ spec:
       
       containers:
         - name: app
-          image: myapp:1.0
+          image: docker.io/library/nginx:1.27  # placeholder, see critical-service
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

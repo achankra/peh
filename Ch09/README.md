@@ -40,7 +40,7 @@ This directory contains all code listings and exercises from Chapter 9, organize
 
 | File | Exercise | Section | Purpose |
 |------|----------|---------|---------|
-| `generate-env-defaults.py` | Exercise 9.1 | "Governance with Guardrails and Tagging" | Script that generates environment-specific Crossplane compositions (development, staging, production) with appropriate defaults for instance class, storage, backup retention, multi-AZ configuration, deletion protection, and performance insights. |
+| `generate-env-defaults.py` | Exercise 9.1 | "Governance with Guardrails and Tagging" | Script that generates environment-specific Crossplane compositions (development, staging, production) in pipeline mode. Each deploys PostgreSQL as a Deployment with environment-appropriate replica count and CPU/memory requests and limits. Storage, backup retention, deletion protection, and monitoring defaults are defined in the script's `EnvironmentConfig` but not yet rendered into the output; wiring them in is a natural extension. |
 
 ### Infrastructure Lifecycle Management
 
@@ -71,6 +71,7 @@ This directory contains all code listings and exercises from Chapter 9, organize
 | File | Listing | Section | Purpose |
 |------|---------|---------|---------|
 | `load-secrets.sh` | N/A | Secrets Management (cross-chapter) | Retrieves database credentials from Bitwarden vault and optionally creates the `db-credentials` Kubernetes Secret for Crossplane. Exports `POSTGRES_PASSWORD`. Run with `--create-k8s` to also create the Kubernetes secret. |
+| `.env_example` | N/A | Secrets Management (fallback) | Template for a gitignored `.env` holding `POSTGRES_PASSWORD` when you are not using Bitwarden. |
 
 ## Prerequisites
 
@@ -93,19 +94,19 @@ kubectl get nodes                       # Verify node(s) are Ready
 # Install Crossplane
 helm repo add crossplane-stable https://charts.crossplane.io/stable
 helm repo update
-helm install crossplane crossplane-stable/crossplane --namespace crossplane-system --create-namespace --wait
+helm install crossplane crossplane-stable/crossplane --version 2.4.2 --namespace crossplane-system --create-namespace --wait
 
 ```
 
 ### System Requirements
 - Kubernetes 1.20 or later (with sufficient RBAC permissions for Crossplane installation)
 - kubectl configured to access your cluster
-- Helm 3.0+ (for Crossplane installation)
-- **Crossplane** v1.14+ (installed via Helm to cluster)
-- **Crossplane CLI** v1.14+ (for building and pushing Crossplane packages)
+- Helm 4.3.0 (for Crossplane installation)
+- **Crossplane** v2.4 (installed via Helm to cluster, chart pinned to 2.4.2)
+- **Crossplane CLI** v2.x (for building and pushing Crossplane packages)
   ```bash
   # macOS: brew install crossplane/tap/crossplane
-  # Linux: curl -sL https://raw.githubusercontent.com/crossplane/crossplane/master/install.sh | sh
+  # Linux: curl -sL -o crossplane https://releases.crossplane.io/stable/v2.4.2/bin/linux_amd64/crossplane && chmod +x crossplane && sudo mv crossplane /usr/local/bin/
   ```
 - Python 3.8+ (for Python scripts)
 
@@ -113,7 +114,8 @@ helm install crossplane crossplane-stable/crossplane --namespace crossplane-syst
 
 Install the following packages before running Python scripts:
 ```bash
-pip install --break-system-packages flask pyyaml kubernetes
+python3 -m venv venv && source venv/bin/activate
+pip install flask pyyaml kubernetes
 ```
 
 The following versions are recommended:
@@ -131,7 +133,8 @@ For Crossplane-managed PostgreSQL deployments:
   ```
 - **Or manually:**
   ```bash
-  export POSTGRES_PASSWORD=platformdev123
+  cp .env_example .env      # then edit .env (POSTGRES_PASSWORD)
+  set -a && source .env && set +a
   ```
 - All providers (Kubernetes, Helm) run locally on Kind — no cloud credentials needed
 
@@ -160,12 +163,41 @@ Hang tight while we grab the latest from your chart repositories...
 ...Successfully got an update from the "crossplane-stable" chart repository
 ```
 
-#### Step 1.2: Install Crossplane with Helm
+#### Step 1.2: Allow the Crossplane Image Registry
+
+If you completed Chapter 2, its Gatekeeper `allowed-registries` constraint denies images from registries that are not on its list. Crossplane and its providers and functions are all pulled from `xpkg.crossplane.io`, so allow it before installing:
+
+```bash
+kubectl patch k8sallowedregistries allowed-registries --type=json -p='[
+  {"op":"add","path":"/spec/parameters/allowedRegistries/-","value":"xpkg.crossplane.io/"}]'
+```
+
+Skip this step if the constraint does not exist (`kubectl get k8sallowedregistries`). The repository's `Ch02/platform-services.yaml` (and Chapter 11's `restrict-image-registries.yaml`) already include this prefix, so a fresh Chapter 2 setup does not need the patch.
+
+#### Step 1.3: Install Crossplane with Helm
+
+If you completed Chapter 11, the `namespace-must-have-team` constraint rejects namespaces without `team`, `cost-center` and `environment` labels, and it checks them at creation time, so `--create-namespace` alone fails. Create the namespace with the labels first (harmless if you did not do Chapter 11):
+
+```bash
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crossplane-system
+  labels:
+    team: platform
+    cost-center: "10001"
+    environment: dev
+EOF
+```
+
+The first start pulls a large image on each node and can take over 3 minutes. If `--wait` times out, the release is marked `failed` even though it keeps starting; once the pods are Running, re-run the same command as `helm upgrade` to mark it `deployed`.
+
 ```bash
 helm install crossplane crossplane-stable/crossplane \
+  --version 2.4.2 \
   --namespace crossplane-system \
   --create-namespace \
-  --set args='{"--enable-composition-functions"}' \
   --set resourcesCrossplane.limits.cpu=500m \
   --set resourcesCrossplane.limits.memory=512Mi \
   --set resourcesCrossplane.requests.cpu=100m \
@@ -181,7 +213,7 @@ STATUS: deployed
 REVISION: 1
 ```
 
-#### Step 1.3: Verify Crossplane Installation
+#### Step 1.4: Verify Crossplane Installation
 ```bash
 # Check Crossplane pods are running
 kubectl get pods -n crossplane-system
@@ -277,6 +309,8 @@ kubectl create clusterrolebinding provider-kubernetes-admin \
 clusterrolebinding.rbac.authorization.k8s.io/provider-kubernetes-admin created
 ```
 
+> **Note:** The service account name includes a package-revision hash (for example `provider-kubernetes-d1ed189e04fc`). If you later change the provider version, Crossplane creates a new revision and a new service account, so delete and re-create this binding with the same commands.
+
 **Next Step:** Proceed to Phase 3: Infrastructure Blueprints
 
 ---
@@ -329,9 +363,19 @@ postgresql-kubernetes    5s
 The PostgreSQL Deployment references a Kubernetes Secret called `db-credentials` for the `POSTGRES_PASSWORD`. Create the `databases` namespace and the secret before submitting any claims.
 
 ```bash
-kubectl create namespace databases
+# Labels are required if the Chapter 11 namespace-must-have-team constraint is active
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: databases
+  labels:
+    team: platform
+    cost-center: "10001"
+    environment: dev
+EOF
 
-# Use the password from Bitwarden (or the manual export above)
+# Use the password from Bitwarden (or the .env you loaded above)
 kubectl create secret generic db-credentials \
   --namespace databases \
   --from-literal=password=${POSTGRES_PASSWORD:-platformdev123}
@@ -339,9 +383,11 @@ kubectl create secret generic db-credentials \
 
 **Expected Output:**
 ```
-namespace/databases created
+namespace/databases created      # "configured" if it already exists
 secret/db-credentials created
 ```
+
+> **Note:** The composition also manages a `db-credentials` Secret in `databases` (`db-secret` in `composition-postgresql.yaml`). When the claim in Phase 6 reconciles, it replaces the Secret created here with its own static demo password (`change-me-in-production`), so the value you set in this step is only used until then.
 
 **Next Step:** Proceed to Phase 4: Environment-Specific Configuration
 
@@ -376,13 +422,11 @@ Generated composition-postgresql-production.yaml
 cat composition-postgresql-production.yaml
 ```
 
-**Expected Output:** YAML file showing:
-- `instanceClass: db.r6g.large` (production instance type)
-- `allocatedStorage: 100` (production storage)
-- `backupRetentionPeriod: 30` (30-day backups)
-- `multiAz: true` (multi-availability zone)
-- `deletionProtection: true` (deletion protection enabled)
-- `performanceInsightsEnabled: true`
+**Expected Output:** A pipeline-mode Composition (`mode: Pipeline`, one `patch-and-transform` step using `function-patch-and-transform`) whose `db-deployment` resource shows the production settings:
+- `replicas: 2`
+- `requests: cpu: 500m, memory: 1Gi`
+- `limits: cpu: 2000m, memory: 2Gi`
+- `image: docker.io/library/postgres:15-alpine`
 
 #### Step 4.4: Apply Generated Compositions
 ```bash
@@ -442,7 +486,7 @@ The tagging patchset defines reusable governance tags that compositions apply to
 cat tagging-patchset.yaml
 ```
 
-These patchsets are referenced inside compositions (e.g., `composition-postgresql.yaml`) using `patchSets[].name`. Every composed resource automatically inherits team, cost-center, environment, and ownership tags — enabling cost allocation, auditing, and lifecycle tracking without developer effort.
+`tagging-patchset.yaml` is a reference snippet, not an applicable resource (it has no `apiVersion` or `kind`). To use it, copy the patchsets into a pipeline step's `input.patchSets` and reference them from a resource with `type: PatchSet` and `patchSetName`. `composition-postgresql.yaml` shows this mechanism with its own `common-labels` patchset. Once a composition applies the tagging patchsets, every composed resource inherits team, cost-center, environment, and ownership tags — enabling cost allocation, auditing, and lifecycle tracking without developer effort.
 
 #### Step 5.3: Apply GPU NodePool XRD (Optional - for innovation use case)
 ```bash
@@ -461,8 +505,20 @@ compositeresourcedefinition.apiextensions.crossplane.io/gpunodepools.compute.pla
 ### Phase 6: Demo Application Integration
 
 #### Step 6.1: Create team-alpha Namespace
+
+The labels satisfy the Chapter 11 `namespace-must-have-team` policy if it is active (`team` letters only, so `alpha` and not `team-alpha`; `environment` one of `dev`, `staging`, `prod`; `cost-center` 4-6 digits). They are harmless otherwise.
+
 ```bash
-kubectl create namespace team-alpha
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-alpha
+  labels:
+    team: alpha
+    cost-center: "10001"
+    environment: dev
+EOF
 ```
 
 **Expected Output:**
@@ -474,6 +530,8 @@ namespace/team-alpha created
 ```bash
 kubectl apply -f demo-app-database.yaml
 ```
+
+The claim selects the `postgresql-kubernetes` composition with `compositionSelector` (`database: postgresql`). This matters because Phase 4 created more compositions for the same `PostgreSQLInstance` kind; without a selector Crossplane picks one of them, and the environment compositions only create a Deployment.
 
 **Expected Output:**
 ```
@@ -487,8 +545,8 @@ kubectl get postgresqlclaim -n team-alpha
 
 **Expected Output:**
 ```
-NAME           READY   SYNCED   AGE
-demo-app-db    false   false    10s
+NAME          SYNCED   READY   CONNECTION-SECRET   AGE
+demo-app-db                                        1s
 ```
 
 #### Step 6.4: Monitor Claim Status
@@ -502,9 +560,15 @@ kubectl get postgresqlclaim -n team-alpha -w
 
 **Expected Output (after ready):**
 ```
-NAME           READY   SYNCED   AGE
-demo-app-db    true    true     45s
+NAME          SYNCED   READY   CONNECTION-SECRET   AGE
+demo-app-db   True     True                        45s
 ```
+
+`READY` means Crossplane has created the composed resources, not that the database is usable. Confirm the PostgreSQL pod and its volume as well:
+```bash
+kubectl get pods,pvc -n databases
+```
+The pod should be `1/1 Running` and the PVC `Bound`. If the PVC stays `Pending`, see "Claim is `READY` but the PostgreSQL pod stays `Pending`" under Troubleshooting.
 
 #### Step 6.5: Verify Connection Secret Creation
 ```bash
@@ -517,6 +581,8 @@ kubectl get secret demo-app-db-connection -n team-alpha -o yaml
 - `port` - Database port
 - `username` - Database username
 - `password` - Database password
+
+The `CONNECTION-SECRET` column of the claim stays empty. Crossplane v2 does not propagate a connection secret from the composite resource to the claim, so the composition creates this Secret itself (`app-connection-secret` in `composition-postgresql.yaml`) in the claim's namespace, named `<claim-name>-connection`.
 
 **Next Step:** Proceed to Phase 7: Testing & Validation
 
@@ -540,22 +606,28 @@ python3 test-infrastructure.py
 **Expected Output:**
 ```
 Testing infrastructure provisioning...
-Waiting for claim demo-app-db to be ready...
 ✓ Claim is ready
 ✓ Connection secret exists
-✓ Application connected to database successfully
+⊘ Skipped app connectivity check (demo-app not deployed)
 
 ✓ All infrastructure tests passed!
 ```
 
+If the claim is not ready yet you also see `Waiting for claim demo-app-db to be ready...` lines. The connectivity check only runs when the Chapter 5 `demo-app` Deployment exists in `team-alpha`; otherwise it is skipped, as above.
+
 #### Step 7.3: Verify Complete Workflow
 ```bash
-# Check all resources in team-alpha namespace
-kubectl get all,secrets,postgresqlclaim -n team-alpha
+# The claim and its connection secret are in the team-alpha namespace
+kubectl get secrets,postgresqlclaim -n team-alpha
+
+# The database itself runs in the databases namespace
+kubectl get deploy,pods,svc,pvc -n databases
 
 # View connection secret details
 kubectl get secret demo-app-db-connection -n team-alpha -o jsonpath='{.data.endpoint}' | base64 -d
 ```
+
+**Expected Output (last command):** `postgresql.databases.svc.cluster.local`
 
 ---
 
@@ -576,7 +648,14 @@ The controller enforces:
 
 #### Step 8.2: Deploy Lifecycle Controller (Production Setup)
 
-For production deployment, create a Kubernetes deployment:
+For production deployment, create a Kubernetes deployment. First put the controller code into the ConfigMap the Deployment mounts:
+
+```bash
+kubectl create configmap lifecycle-controller-code \
+  --from-file=lifecycle-controller.py -n crossplane-system
+```
+
+Then deploy it:
 
 ```bash
 cat <<EOF | kubectl apply -f -
@@ -598,8 +677,19 @@ spec:
       serviceAccountName: crossplane
       containers:
       - name: controller
-        image: python:3.10-slim
-        command: ["python", "/controller/lifecycle-controller.py"]
+        # Fully qualified so the Chapter 2 allowed-registries policy accepts it
+        image: docker.io/library/python:3.10-slim
+        # The slim image has no Kubernetes client; install it at start-up.
+        # -u keeps the log output unbuffered so kubectl logs shows it immediately.
+        command: ["sh", "-c", "pip install --quiet --no-cache-dir kubernetes && python -u /controller/lifecycle-controller.py"]
+        # Required by the Chapter 2 require-limits policy
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
         volumeMounts:
         - name: controller-code
           mountPath: /controller
@@ -608,6 +698,25 @@ spec:
         configMap:
           name: lifecycle-controller-code
 EOF
+```
+
+The `crossplane` service account can already list and watch claims cluster-wide, which is all the controller needs. This demo reuses it for brevity; for real use, create a dedicated service account with read-only access to `postgresqlclaims`.
+
+#### Step 8.3: Verify the Controller
+
+The first start installs the Kubernetes client, which takes a few seconds. The controller only logs violations, so a compliant claim produces no output. Trigger one by removing the owner label from the demo claim, check the log, then put the label back:
+
+```bash
+kubectl get pods -n crossplane-system -l app=lifecycle-controller
+
+kubectl label postgresqlclaim demo-app-db -n team-alpha platform.io/owner-
+kubectl logs -n crossplane-system deploy/infrastructure-lifecycle-controller --tail=5
+kubectl label postgresqlclaim demo-app-db -n team-alpha platform.io/owner=demo-app
+```
+
+**Expected Output (logs):**
+```
+Policy violations for demo-app-db: ['Missing platform.io/owner label']
 ```
 
 ---
@@ -628,7 +737,7 @@ kubectl logs -n crossplane-system deployment/crossplane
 kubectl describe providers -n crossplane-system
 ```
 
-**Solution:** Wait 2-3 minutes for provider controllers to start, check network connectivity to xpkg.upbound.io
+**Solution:** Wait 2-3 minutes for provider controllers to start, check network connectivity to xpkg.crossplane.io
 
 ### Issue: PostgreSQL claim not becoming ready
 **Diagnosis:**
@@ -646,6 +755,45 @@ kubectl describe object <name> | tail -20
 - Crossplane providers not healthy (check `kubectl get providers`)
 
 **Solution:** Run through the Phase 2 steps carefully, ensuring providers and functions are healthy before proceeding.
+
+### Issue: Claim is `READY` but the PostgreSQL pod stays `Pending` (PVC `postgresql-data` is `Pending`)
+A claim becomes `READY` once Crossplane has created its resources, not when the database is usable.
+
+**Diagnosis:**
+```bash
+kubectl describe pvc postgresql-data -n databases
+```
+Look for a `ProvisioningFailed` event such as:
+```
+admission webhook "validation.gatekeeper.sh" denied the request: [require-limits] Container helper-pod is missing required cpu limit
+```
+
+**Cause:** The Kind `standard` StorageClass uses the local-path provisioner, which starts a short-lived `helper-pod` in the `local-path-storage` namespace to create each volume. That pod has no resource limits, so a Gatekeeper constraint that denies pods without limits (and does not exclude `local-path-storage`) blocks it. Chapter 2's `require-limits` constraint is in `deny` mode and blocks it; Chapter 11's constraints start in `dryrun` mode and would not.
+
+**Solution:** Add resource limits to the helper pod in the provisioner's ConfigMap:
+```bash
+kubectl edit configmap local-path-config -n local-path-storage
+```
+Under `helperPod.yaml`, add a `resources` block to the `helper-pod` container, next to `image`:
+```yaml
+    resources:
+      requests:
+        cpu: 50m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+```
+The provisioner picks up the change after Kubernetes syncs the ConfigMap into its pod and retries with backoff, so the PVC can take several minutes to bind.
+
+The provisioner pod itself also has no limits, so the same constraint blocks any *new* provisioner pod (the running one predates the policy). Restarting it would leave the rollout stuck, so give it limits first:
+```bash
+kubectl set resources deployment/local-path-provisioner -n local-path-storage \
+  -c local-path-provisioner --requests=cpu=50m,memory=64Mi --limits=cpu=100m,memory=128Mi
+```
+This rolls the provisioner; a freshly started provisioner starts with an empty retry queue, so pending volumes should be retried without waiting for the backoff.
+
+Both changes live in the cluster, so re-apply them if you recreate the Kind cluster.
 
 ### Issue: Python script import errors
 ```bash

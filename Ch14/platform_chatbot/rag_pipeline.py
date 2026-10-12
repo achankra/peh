@@ -19,14 +19,19 @@ from dataclasses import dataclass
 from datetime import datetime
 
 try:
-    from langchain.document_loaders import DirectoryLoader, TextLoader
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
-    from langchain.embeddings.huggingface import HuggingFaceEmbeddings
-    from langchain.vectorstores import Chroma, Pinecone
-    from langchain.chains import RetrievalQA
     import chromadb
 except ImportError:
     chromadb = None
+
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    RecursiveCharacterTextSplitter = None
+
+try:
+    from langchain_huggingface import HuggingFaceEmbeddings
+except ImportError:
+    HuggingFaceEmbeddings = None
 
 try:
     from rank_bm25 import BM25Okapi
@@ -37,6 +42,11 @@ try:
     from langchain_anthropic import ChatAnthropic
 except ImportError:
     ChatAnthropic = None
+
+try:
+    from langchain_ollama import ChatOllama
+except ImportError:
+    ChatOllama = None
 
 
 logger = logging.getLogger(__name__)
@@ -129,8 +139,16 @@ class RAGPipeline:
                 temperature=0.7,
                 max_tokens=1000
             )
+        # Local alternative: set OLLAMA_MODEL (e.g. "mistral") with `ollama serve` running
+        ollama_model = os.getenv("OLLAMA_MODEL")
+        if not api_key and ollama_model and ChatOllama:
+            logger.info(f"Initializing Ollama LLM ({ollama_model})")
+            return ChatOllama(model=ollama_model, temperature=0.7)
         if not api_key:
-            logger.warning("ANTHROPIC_API_KEY not set. Using mock LLM.")
+            logger.warning(
+                "Neither ANTHROPIC_API_KEY nor OLLAMA_MODEL set "
+                "(or langchain-ollama not installed). Using mock LLM."
+            )
         elif ChatAnthropic is None:
             logger.warning(
                 "langchain-anthropic not installed. Using mock LLM. "
@@ -182,7 +200,8 @@ class RAGPipeline:
             texts = splitter.split_text(doc['content'])
             for text in texts:
                 chunks.append({
-                    'content': text,
+                    # "File:" header lets _extract_sources cite the file later
+                    'content': f"File: {doc['source']}\n\n{text}",
                     'source': doc['source'],
                     'type': doc['type']
                 })
@@ -371,14 +390,15 @@ ANSWER:"""
             return "Unable to generate answer. Please try again."
     
     def _extract_sources(self, documents: List[str]) -> List[str]:
-        """Extract source citations from documents."""
+        """Extract source citations from the header line of each chunk."""
         sources = set()
         for doc in documents:
-            # Try to extract metadata or filename from document
-            lines = doc.split('\n')
-            if lines and lines[0].startswith('File:'):
-                sources.add(lines[0].replace('File:', '').strip())
-        return list(sources)
+            # index_documents writes "File: <path>", index_json_data "Title: <title>"
+            first_line = doc.split('\n', 1)[0]
+            for prefix in ('File:', 'Title:'):
+                if first_line.startswith(prefix):
+                    sources.add(first_line[len(prefix):].strip())
+        return sorted(sources)
     
     def batch_query(self, queries: List[str]) -> List[RetrievalResult]:
         """Process multiple queries efficiently."""
@@ -566,13 +586,15 @@ if __name__ == "__main__":
     rag = RAGPipeline(vector_db=vector_db)
 
     # Display mode banner
-    using_real_llm = not isinstance(rag.llm, MockLLM)
     print("=" * 70)
-    if using_real_llm:
+    if ChatOllama and isinstance(rag.llm, ChatOllama):
+        print(f"  MODE: LIVE — Using local Ollama ({os.getenv('OLLAMA_MODEL')})")
+    elif not isinstance(rag.llm, MockLLM):
         print("  MODE: LIVE — Using Anthropic Claude (claude-sonnet-4-5-20250929)")
     else:
-        print("  MODE: MOCK — No LLM API key or langchain-anthropic not installed")
+        print("  MODE: MOCK — No LLM configured or LLM package not installed")
         print("  Tip:  export ANTHROPIC_API_KEY=sk-ant-... && pip3 install langchain-anthropic")
+        print("        or: export OLLAMA_MODEL=mistral && pip3 install langchain-ollama")
     print("=" * 70)
 
     # Index sample documentation

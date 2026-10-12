@@ -1,6 +1,12 @@
 # Chapter 11: Prometheus Configuration for Gatekeeper Metrics
 # Listing 11.9 - Scrape configuration for Gatekeeper audit metrics
 # Configures Prometheus to collect policy violation data from Gatekeeper.
+#
+# This ConfigMap is for a standalone Prometheus that you mount it into.
+# A Prometheus Operator / kube-prometheus-stack install ignores it and
+# discovers targets through the ServiceMonitor in
+# gatekeeper-metrics-servicemonitor.yaml instead (README step 5.2).
+# The target is the `gatekeeper` Service created by that same file.
 
 apiVersion: v1
 kind: ConfigMap
@@ -15,4 +21,4 @@ data:
       - job_name: 'gatekeeper'
         static_configs:
           - targets:
-              - ['gatekeeper-audit.gatekeeper-system:8888']
+              - 'gatekeeper.gatekeeper-system:8888'

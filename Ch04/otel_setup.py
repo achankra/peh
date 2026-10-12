@@ -46,7 +46,8 @@ def setup_tracing(service_name: str, otlp_endpoint: str = "localhost:4317"):
     })
     
     # Initialize OTLP span exporter
-    otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
+    # insecure=True: the collector's OTLP gRPC receiver is plaintext (no TLS)
+    otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
     
     # Create TracerProvider with batch processing
     # BatchSpanProcessor improves performance by sending spans in batches
@@ -78,12 +79,12 @@ def setup_metrics(service_name: str, otlp_endpoint: str = "localhost:4317"):
     })
     
     # Initialize OTLP metric exporter with periodic export
-    otlp_metric_exporter = OTLPMetricExporter(endpoint=otlp_endpoint)
+    otlp_metric_exporter = OTLPMetricExporter(endpoint=otlp_endpoint, insecure=True)
     
     # PeriodicExportingMetricReader exports metrics every 60 seconds
     metric_reader = PeriodicExportingMetricReader(
         otlp_metric_exporter,
-        interval_millis=60000
+        export_interval_millis=60000
     )
     
     # Create MeterProvider with metric reader

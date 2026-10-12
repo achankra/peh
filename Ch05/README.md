@@ -128,6 +128,7 @@ curl http://localhost:3000/health
   - CPU utilization target: 50%
   - Memory utilization target: 70%
   - Aggressive scale-up (100% per 30s), conservative scale-down (50% per 60s)
+  - **Requires Metrics Server**: without it the HPA targets show `<unknown>` and it never scales. Install it first (see the Metrics Server row and Kind note in the root `README.md`), then verify with `kubectl top nodes`.
 
 - **PodDisruptionBudget** (ensures availability)
   - Minimum 1 pod available during disruptions
@@ -420,7 +421,7 @@ kubectl get nodes                       # Verify node(s) are Ready
 - **Node.js**: 16+ (for JavaScript app and instrumentation)
 - **Docker**: 20.10+ (for containerization)
 - **Kubernetes**: 1.24+ (minikube, Docker Desktop, or cloud cluster) - optional for K8s deployment
-- **kubectl**: 1.24+ (for Kubernetes operations) - optional
+- **kubectl**: 1.37.1 (for Kubernetes operations) - optional
 - **git**: 2.30+ (for repository analysis with KPI collector)
 
 ### Python Dependencies
@@ -503,32 +504,32 @@ python demo-app/app.py
 
 **Expected Output**:
 ```
-Starting Flask application on http://0.0.0.0:5000
+Starting Flask application on http://0.0.0.0:5001
 ```
 
 **Command Option B - Docker**:
 ```bash
 # Build the image
-docker build -t platform-demo-app:latest demo-app/
+docker build -t ghcr.io/company/platform-demo-app:1.0.0 demo-app/
 
 # Run the container
-docker run -p 5000:5000 platform-demo-app:latest
+docker run -d --name platform-demo-app -p 5001:5001 ghcr.io/company/platform-demo-app:1.0.0
 ```
 
 **Test the App**:
 ```bash
 # Health check
-curl http://localhost:5000/health
+curl http://localhost:5001/health
 # Output: {"status": "healthy"}
 
 # Create an item
-curl -X POST http://localhost:5000/items \
+curl -X POST http://localhost:5001/items \
   -H "Content-Type: application/json" \
   -d '{"name": "My Item", "description": "Test item"}'
 # Output: {"data": {"id": "abc123", "name": "My Item", ...}, "status": 201}
 
 # List items
-curl http://localhost:5000/items
+curl http://localhost:5001/items
 # Output: {"data": [...], "status": 200}
 ```
 
@@ -549,12 +550,12 @@ curl http://localhost:5000/items
 **Option A - Using kubectl directly**:
 ```bash
 # Build the Docker image locally
-docker build -t platform-demo-app:latest demo-app/
+docker build -t ghcr.io/company/platform-demo-app:1.0.0 demo-app/
 
 # Load the image into Kind (Kind can't pull from local Docker daemon)
-kind load docker-image platform-demo-app:latest --name peh
+kind load docker-image ghcr.io/company/platform-demo-app:1.0.0 --name platform-dev
 
-# Apply manifests
+# Apply manifests, but adapt 'IMAGE_TAG_PLACEHOLDER' first to 1.0.0
 kubectl apply -f demo-app/k8s-manifests.yaml
 
 # Verify deployment
@@ -581,10 +582,10 @@ kubectl get pods -l app=platform-demo-app
 kubectl get endpoints platform-demo-app
 
 # Port-forward to test locally
-kubectl port-forward svc/platform-demo-app 5000:80
+kubectl port-forward svc/platform-demo-app 5001:80
 
 # Test via port-forward
-curl http://localhost:5000/health
+curl http://localhost:5001/health
 ```
 
 **Monitor HPA Scaling**:
@@ -593,8 +594,11 @@ curl http://localhost:5000/health
 kubectl get hpa platform-demo-app-hpa --watch
 
 # Generate load to trigger scaling (in another terminal)
-kubectl run -it --rm debug --image=alpine --restart=Never -- sh
+kubectl run -it --rm debug --image=docker.io/library/alpine --restart=Never \
+  --overrides='{"spec":{"containers":[{"name":"debug","image":"docker.io/library/alpine","stdin":true,"tty":true,"resources":{"requests":{"cpu":"50m","memory":"32Mi"},"limits":{"cpu":"200m","memory":"64Mi"}}}]}}' \
+  -- sh
 # Inside the pod:
+apk add wget # install binary
 while true; do wget -q -O- http://platform-demo-app; done
 ```
 
@@ -891,12 +895,12 @@ python platform-kpi-collector.py --namespace default --export kpis_baseline.json
 # 4. Deploy demo app (if not already deployed)
 echo "Step 4: Deploy Demo Application"
 docker build -t platform-demo-app:latest demo-app/
-docker run -p 5000:5000 -d platform-demo-app:latest
+docker run -p 5001:5001 -d platform-demo-app:latest
 
 # 5. Validate the deployment
 echo "Step 5: Validate Deployment"
-curl http://localhost:5000/health
-curl -X POST http://localhost:5000/items \
+curl http://localhost:5001/health
+curl -X POST http://localhost:5001/items \
   -H "Content-Type: application/json" \
   -d '{"name": "Test Item"}'
 
@@ -1067,7 +1071,7 @@ python platform-kpi-collector.py --namespace default
 
 ### Problem: HPA not scaling (0 replicas scaling to 2-5)
 **Solution**:
-- Ensure metrics-server is installed: `kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml`
+- Ensure metrics-server is installed: `kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.0/components.yaml`
 - Wait 30 seconds for metrics to populate
 
 ### Problem: OpenTelemetry exporter fails to connect

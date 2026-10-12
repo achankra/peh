@@ -72,7 +72,7 @@ spec:
   owner: pilot-team-alpha
   system: pilot-program
   definition:
-    $text: ./api/openapi.yaml
+    $text: ./api-spec.yaml
 
 ---
 # Organisational structure — import groups and users BEFORE registering

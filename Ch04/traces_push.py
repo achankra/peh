@@ -17,6 +17,7 @@ from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION, Resource
 from opentelemetry.semconv.trace import SpanAttributes
 import logging
+from datetime import datetime, timezone
 
 # Configure logging for observability
 logging.basicConfig(level=logging.INFO)
@@ -41,7 +42,8 @@ def initialize_tracer(service_name: str, otlp_endpoint: str = "localhost:4317"):
     })
     
     # Create OTLP exporter for pushing traces to collector
-    otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
+    # insecure=True: the collector's OTLP gRPC receiver is plaintext (no TLS)
+    otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
     
     # Initialize TracerProvider with batch span processor
     # BatchSpanProcessor improves performance by sending spans in batches
@@ -78,7 +80,7 @@ def process_user_request(tracer, user_id: str, action: str) -> dict:
         parent_span.add_event("user_request_started", {
             "user_id": user_id,
             "action": action,
-            "timestamp": str(__import__('datetime').datetime.utcnow())
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
         
         try:

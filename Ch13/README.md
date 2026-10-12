@@ -73,17 +73,17 @@ kubectl get nodes                       # Verify node(s) are Ready
 # Install Prometheus + Grafana
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
-helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --namespace monitoring --create-namespace --wait
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --version 92.1.1 --namespace monitoring --create-namespace --wait
 
 # Install Velero + MinIO
 helm repo add vmware-tanzu https://vmware-tanzu.github.io/helm-charts
 helm repo update
-helm install velero vmware-tanzu/velero --namespace velero --create-namespace
+helm install velero vmware-tanzu/velero --version 12.2.1 --namespace velero --create-namespace
 
 # Install Chaos Mesh
 helm repo add chaos-mesh https://charts.chaos-mesh.org
 helm repo update
-helm install chaos-mesh chaos-mesh/chaos-mesh --namespace chaos-mesh --create-namespace
+helm install chaos-mesh chaos-mesh/chaos-mesh --version 2.8.4 --namespace chaos-mesh --create-namespace
 
 ```
 
@@ -105,7 +105,7 @@ helm install chaos-mesh chaos-mesh/chaos-mesh --namespace chaos-mesh --create-na
 
 2. **Sloth** - SLO-as-Code Prometheus rule generator
    ```bash
-   go install github.com/slok/sloth/cmd/sloth@latest
+   go install github.com/slok/sloth/cmd/sloth@v0.11.0
    ```
    > **Important:** The `go install` command places the binary in `~/go/bin/`. If `which sloth` returns "not found" after install, your Go bin directory is not in your PATH. Run `export PATH=$PATH:~/go/bin` (and add it to your shell profile).
 
@@ -129,7 +129,7 @@ helm install chaos-mesh chaos-mesh/chaos-mesh --namespace chaos-mesh --create-na
    brew install velero
 
    # Linux
-   curl -L -o velero.tar.gz https://github.com/vmware-tanzu/velero/releases/latest/download/velero-v1.12.0-linux-amd64.tar.gz
+   curl -L -o velero.tar.gz https://github.com/vmware-tanzu/velero/releases/download/v1.18.2/velero-v1.18.2-linux-amd64.tar.gz
    tar xzf velero.tar.gz
    sudo mv velero-*/velero /usr/local/bin/
    ```
@@ -141,7 +141,7 @@ helm install chaos-mesh chaos-mesh/chaos-mesh --namespace chaos-mesh --create-na
    ```bash
    helm repo add chaos-mesh https://charts.chaos-mesh.org
    helm repo update
-   helm install chaos-mesh chaos-mesh/chaos-mesh \
+   helm install chaos-mesh chaos-mesh/chaos-mesh --version 2.8.4 \
      --namespace chaos-mesh --create-namespace \
      --set chaosDaemon.runtime=containerd \
      --set chaosDaemon.socketPath=/run/containerd/containerd.sock
@@ -160,7 +160,7 @@ helm install chaos-mesh chaos-mesh/chaos-mesh --namespace chaos-mesh --create-na
    # If not already installed from Chapter 4/11/12:
    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
    helm repo update
-   helm install monitoring prometheus-community/kube-prometheus-stack \
+   helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --version 92.1.1 \
      --namespace monitoring --create-namespace
    ```
    If already installed, the `helm install` will error with "cannot re-use a name" — that's fine.
@@ -170,6 +170,7 @@ helm install chaos-mesh chaos-mesh/chaos-mesh --namespace chaos-mesh --create-na
 6. **Python 3** (3.8+) - For automation scripts
    ```bash
    python3 --version
+   python3 -m venv venv && source venv/bin/activate
    pip3 install pyyaml
    ```
 
@@ -196,7 +197,7 @@ helm list -n monitoring 2>/dev/null | grep monitoring
 # If no output, install it:
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
-helm install monitoring prometheus-community/kube-prometheus-stack \
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --version 92.1.1 \
   --namespace monitoring --create-namespace
 
 # Verify deployment
@@ -204,10 +205,10 @@ kubectl get pods -n monitoring
 
 # Port-forward Prometheus and Grafana
 kubectl port-forward -n monitoring svc/prometheus-operated 9090:9090 &
-kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80 &
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80 &
 
 # Retrieve Grafana admin password
-kubectl get secret monitoring-grafana -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d; echo
+kubectl get secret kube-prometheus-stack-grafana -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d; echo
 ```
 **Expected Output:** Prometheus accessible at http://localhost:9090, Grafana at http://localhost:3000 (login: admin / password from above)
 
@@ -231,7 +232,7 @@ kubectl get prometheusrule -A | grep -i slo
 #### Step 1.3: Deploy SLO Dashboard
 ```bash
 # Get Grafana admin password (if you haven't already)
-GRAFANA_PASS=$(kubectl get secret monitoring-grafana -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d)
+GRAFANA_PASS=$(kubectl get secret  kube-prometheus-stack-grafana -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d)
 
 # Import via API:
 curl -X POST http://admin:${GRAFANA_PASS}@localhost:3000/api/dashboards/db \
@@ -243,6 +244,9 @@ curl -X POST http://admin:${GRAFANA_PASS}@localhost:3000/api/dashboards/db \
 # 2. Click + (left sidebar) → Import → Upload JSON file
 # 3. Select slo-dashboard.json → click Import
 ```
+> **Troubleshooting:** If the API returns `401 Invalid username or password`, Grafana's stored admin password has drifted from the secret (it only reads the secret on first start). Reset it to the secret's value, then re-run the import:
+> `kubectl exec -n monitoring deploy/kube-prometheus-stack-grafana -c grafana -- grafana cli admin reset-admin-password "$GRAFANA_PASS"`
+
 **Expected Output:** SLO Dashboard visible in Grafana showing availability, latency SLIs and error budget
 
 > **Note:** Dashboard panels will show "No data" until a workload is generating `http_requests_total` metrics matching `job="demo-app"`. The demo-app deployed in Step 3.2 provides this. If you just want to verify the dashboard imports correctly, the panels structure is sufficient.
@@ -271,6 +275,8 @@ kubectl get pods -n velero
 
 > **Note:** `velero install` creates the namespace, installs CRDs, deploys the controller, and configures the default BackupStorageLocation. The `--use-node-agent` flag enables file-system-level backups (replaces the deprecated `--use-restic`). This is the recommended approach for modern Kubernetes clusters.
 
+> **Troubleshooting (Ch03/Ch11 Gatekeeper policies active):** `velero install` fails with `namespace-must-have-team` because it creates an unlabelled namespace, and its pods are rejected for short image names and missing resource limits. Create the namespace first with `kubectl create namespace velero` plus the `team`, `environment` and `cost-center` labels in one manifest (see the existing namespaces for values). Then render the install with `velero install ... --dry-run -o json`, drop the `Namespace` item, prefix the Velero images with `docker.io/`, add CPU/memory requests and limits to the `velero` Deployment, its plugin init container and the `node-agent` DaemonSet, and `kubectl apply` the result. If pods stay Pending with `Insufficient cpu`, lower those CPU requests (for example to `10m`) or free CPU on the workers.
+
 #### Step 2.2: Deploy MinIO (Local S3 Storage)
 ```bash
 # Deploy MinIO into the velero namespace (S3-compatible object store)
@@ -283,6 +289,8 @@ kubectl wait --for=condition=available deployment/minio -n velero --timeout=120s
 velero backup-location get
 ```
 **Expected Output:** MinIO pods running, `default` backup location phase is `Available`
+
+> **Note:** MinIO no longer publishes community images to Docker Hub or Quay, so `velero-storage-location.yaml` uses the pinned `docker.io/bitnamilegacy/minio` build (it also provides `mc` for the bucket-setup job). The backup location can show `Unavailable` for up to a minute until MinIO is ready; Velero revalidates it automatically.
 
 **Next Steps:** Proceed to Step 2.3
 
@@ -315,7 +323,9 @@ velero backup create hook-test-backup --wait
 # Check backup included hooks
 velero backup describe hook-test-backup | grep -i "hook"
 ```
-**Expected Output:** Deployment with backup hooks ready, backup captures pre-backup quiesce state
+**Expected Output:** Deployment with backup hooks ready, backup captures pre-backup quiesce state (`HooksAttempted: 2`, `HooksFailed: 0` in the describe output)
+
+> **Note:** `backup-config-annotation.yaml` uses a placeholder `nginx` container for the app and a `redis` sidecar (both with `docker.io/` prefixes), requests the `standard` StorageClass, and sets CPU requests of at least `50m` per container, so the pods pass the Gatekeeper and `default`-namespace LimitRange policies. The hooks run `redis-cli` commands that exist in the sidecar. `backup-self-service.yaml` keeps the Helm values as comments so `kubectl apply` accepts the file. Run `velero backup describe` without `--details`: the CLI cannot resolve the in-cluster MinIO address from your workstation, so the warnings/errors sections print `<error getting ...>` even when the backup succeeded.
 
 **Next Steps:** Test disaster recovery in Step 2.5
 
@@ -335,10 +345,12 @@ kubectl get namespaces | grep dr-drill-demo
 kubectl get pods -n dr-drill-demo -o wide
 
 # Cleanup backups from drill
-velero backup delete dr-drill-backup-* --confirm
-velero restore delete dr-drill-restore-* --confirm
+velero backup get | awk '/^dr-drill-backup-/{print $1}' | xargs -n1 velero backup delete --confirm
+velero restore get | awk '/^dr-drill-restore-/{print $1}' | xargs -n1 velero restore delete --confirm
 ```
 **Expected Output:** DR drill completes with RTO measured (e.g., "Actual Recovery Time: 45s"), namespace and pods restored
+
+> **Note:** With the Ch11 Gatekeeper policies active, the script creates the drill namespace with `team`/`environment`/`cost-center` labels, uses a `docker.io/` image with resource limits, and recreates the labelled namespace before the restore, because Velero would otherwise recreate it without labels and the `namespace-must-have-team` policy rejects it (the restore then ends `PartiallyFailed` with nothing restored). The reported RTO covers the Velero restore only; the script then waits for the Deployment to become available. The cleanup commands look up the drill backup names because Velero does not expand wildcards.
 
 **Validation Checks:**
 - RTO meets target (script configurable, default 600s)
@@ -379,6 +391,12 @@ chmod +x restore-validation.sh
 # Specify a particular backup and RTO target
 ./restore-validation.sh --backup-name daily-backup-20260221020000 --rto-target 300
 
+# Restore a source namespace into the temporary test namespace and validate it
+# (without --namespaces, Velero restores into the original namespaces, where the
+# objects already exist and are skipped, so the temporary namespace stays empty)
+velero backup create demo-app-backup --include-namespaces default --selector app=demo-app --wait
+./restore-validation.sh --backup-name demo-app-backup --namespaces default
+
 # Output the validation report to a file
 ./restore-validation.sh --output /tmp/dr-validation-report.txt
 
@@ -387,6 +405,8 @@ chmod +x restore-validation.sh
 ```
 
 **Expected Output:** Restore completes successfully, RTO measured and compared to target, test namespace cleaned up automatically.
+
+> **Note:** The script fails (exit 1, test namespace kept for investigation) if the Velero restore ends in any phase other than `Completed`, including `PartiallyFailed`. The test namespace is created with the `team`/`environment`/`cost-center` labels the Ch11 Gatekeeper policy requires. The backup must contain everything the workload needs (ServiceAccounts, ConfigMaps): a selector-based backup only includes objects carrying that label, which is why `backup-config-annotation.yaml` labels them `app: demo-app`. On Kind, `local-path` volumes are hostPath-backed, so Velero skips their data (`hostPath volume which is not supported for pod volume backup`) and restores the PVC definition only.
 
 **Recommended Schedule:** Run weekly via cron or CI/CD pipeline to ensure backup recoverability.
 
@@ -398,13 +418,20 @@ The `platform-backup-config/values.yaml` provides a complete Helm values file fo
 # Review the configuration
 cat platform-backup-config/values.yaml
 
+# Render the chart with these values to check them without installing anything
+# (--api-versions lets the chart emit the ServiceMonitor and PrometheusRule)
+helm template velero vmware-tanzu/velero --version 12.2.1 -n velero \
+  -f platform-backup-config/values.yaml --api-versions monitoring.coreos.com/v1
+
 # Deploy Velero using these values (after customizing for your environment)
-helm install velero vmware-tanzu/velero \
+helm install velero vmware-tanzu/velero --version 12.2.1 \
   --namespace velero --create-namespace \
   -f platform-backup-config/values.yaml
 ```
 
 Key configuration areas: MinIO as S3-compatible local storage, daily + hourly backup schedules, 30-day retention, pre/post-backup hooks for database quiescing, Prometheus monitoring, and alert rules.
+
+> **Note:** The values follow the `vmware-tanzu/velero` chart 12.x schema (`image`, `configuration.backupStorageLocation` as a list, `metrics`, `nodeAgent`); keys the chart does not define are ignored silently. Do not run `helm install` on top of the Velero from Steps 2.1-2.2: the chart's Deployment selector differs from the one `velero install` created, so Helm cannot take it over. With the Gatekeeper policies active, create the labelled `velero` namespace first (see the Step 2.1 troubleshooting note) rather than using `--create-namespace`. The schedules and hooks name the book's example namespaces (`team-alpha`, `team-beta`, `production`); namespaces that do not exist in your cluster are reported as backup errors.
 
 ### Phase 3: Chaos Engineering and Resilience Testing
 
@@ -414,13 +441,10 @@ Key configuration areas: MinIO as S3-compatible local storage, daily + hourly ba
 helm repo add chaos-mesh https://charts.chaos-mesh.org
 helm repo update
 
-# Install Chaos Mesh in namespace
-helm install chaos-mesh chaos-mesh/chaos-mesh \
+# Install Chaos Mesh in namespace (settings: containerd runtime, privileged daemon, webhook)
+helm install chaos-mesh chaos-mesh/chaos-mesh --version 2.8.4 \
   --namespace chaos-mesh --create-namespace \
-  --set chaosDaemon.privileged=true \
-  --set controllerManager.enableWebhook=true \
-  --set chaosDaemon.runtime=containerd \
-  --set chaosDaemon.socketPath=/run/containerd/containerd.sock
+  -f chaos-mesh-values.yaml
 
 # Verify installation
 kubectl get pods -n chaos-mesh
@@ -428,23 +452,27 @@ kubectl api-resources | grep -i chaos
 ```
 **Expected Output:** Chaos Mesh pods running (chaos-controller-manager, chaos-daemon on each node)
 
+> **Note:** `chaos-mesh-values.yaml` carries the same settings as the usual `--set` flags (`chaosDaemon.privileged=true`, `controllerManager.enableWebhook=true`, `chaosDaemon.runtime=containerd`, `chaosDaemon.socketPath=/run/containerd/containerd.sock`), plus resource limits and a single controller replica so the pods fit on the Kind workers.
+>
+> **Troubleshooting (Ch03/Ch11 Gatekeeper policies active):** `--create-namespace` fails with `namespace-must-have-team`, and pods without resource limits are rejected. Create the namespace first with the `team`, `environment` and `cost-center` labels (the same manifest as in Step 2.1), then run `helm install` without `--create-namespace`; the values file already sets the limits. The `ghcr.io` images are large: the first install can take 5-10 minutes on a slow connection and exceed `--wait`. If Helm reports a timeout while the pods are still pulling, wait for them to become ready and re-run the command as `helm upgrade chaos-mesh chaos-mesh/chaos-mesh -n chaos-mesh -f chaos-mesh-values.yaml` to mark the release deployed.
+
 **Next Steps:** Proceed to Step 3.2
 
 #### Step 3.2: Deploy Demo Application (Target for Chaos Tests)
 ```bash
-# Create namespace for chaos testing
-kubectl create namespace chaos-testing
-
-# Deploy demo application
-kubectl create deployment demo-app --image=nginx:alpine --replicas=3 -n chaos-testing
+# Create the chaos-testing namespace and deploy the demo application
+# (nginx, 3 replicas, container `nginx`, label app=demo-app)
+kubectl apply -f chaos-demo-app.yaml
 
 # Wait for pods to be ready
-kubectl wait --for=condition=available deployment/demo-app -n chaos-testing --timeout=60s
+kubectl wait --for=condition=available deployment/demo-app -n chaos-testing --timeout=180s
 
 # Verify application running
 kubectl get pods -n chaos-testing
 ```
 **Expected Output:** 3 demo-app pods running in chaos-testing namespace
+
+> **Note:** `chaos-demo-app.yaml` replaces `kubectl create deployment demo-app --image=nginx:alpine`: with the Gatekeeper policies active that command is rejected (unlabelled namespace, short image name, no resource limits). The manifest sets the namespace labels, a `docker.io/` image and limits, and keeps the container name `nginx` and the `app=demo-app` label that the chaos experiments select on.
 
 **Next Steps:** Run chaos experiments in Step 3.3
 
@@ -474,11 +502,16 @@ kubectl apply -f chaos-experiment-network.yaml
 # Verify multiple chaos resources created
 kubectl get networkchaos -n chaos-testing
 
-# Monitor application behavior
-kubectl exec -it $(kubectl get pod -n chaos-testing -l app=demo-app -o jsonpath='{.items[0].metadata.name}') \
-  -n chaos-testing -- curl -v http://localhost:8080/health
+# Monitor application behavior: time a request from one demo-app pod to another
+# (the chaos applies to traffic leaving the pods, so a request to localhost is not affected)
+PODS=($(kubectl get pod -n chaos-testing -l app=demo-app -o jsonpath='{.items[*].metadata.name}'))
+TARGET_IP=$(kubectl get pod "${PODS[@]: -1}" -n chaos-testing -o jsonpath='{.status.podIP}')
+kubectl exec "${PODS[@]:0:1}" -n chaos-testing -- \
+  curl -s -o /dev/null -w "http=%{http_code} total=%{time_total}s\n" http://$TARGET_IP/
 ```
-**Expected Output:** Application handles network degradation gracefully, responds despite latency/loss
+**Expected Output:** Application handles network degradation gracefully, responds despite latency/loss (`http=200`, with a total time of several hundred milliseconds while the experiments run, instead of a few milliseconds)
+
+> **Note:** The demo application is nginx, which listens on port 80 and has no `/health` endpoint, so the request goes to `/` on port 80. The commands use bash array syntax; in zsh, arrays start at index 1 (use `${PODS[1]}` and `${PODS[-1]}`). Both chaos files also create a `Schedule` (`pod-kill-schedule` every 5 minutes, `network-chaos-schedule`) that keeps injecting faults until deleted: `kubectl delete schedule --all -n chaos-testing`.
 
 #### Step 3.4: Run Multi-Stage Chaos Workflows
 ```bash
@@ -493,7 +526,7 @@ kubectl describe workflow resilience-test-workflow -n chaos-testing
 watch "kubectl get pods -n chaos-testing"
 
 # View workflow logs
-kubectl logs -n chaos-mesh -l app=chaos-controller-manager --tail=50
+kubectl logs -n chaos-mesh -l app.kubernetes.io/component=controller-manager --tail=50
 
 # Verify recovery after workflow completes
 kubectl get deployment demo-app -n chaos-testing -o jsonpath='{.status.replicas}'
@@ -502,10 +535,13 @@ kubectl get deployment demo-app -n chaos-testing -o jsonpath='{.status.replicas}
 
 #### Step 3.5: Generate Resilience Report with Chaos Runner
 ```bash
-# Create chaos namespace if not exists
-kubectl create namespace chaos-testing --dry-run=client -o yaml | kubectl apply -f -
+# The chaos-testing namespace was created in Step 3.2
+kubectl get namespace chaos-testing
 
 # Run chaos experiment and collect metrics
+# (waits for every experiment in the file; delete earlier runs first, because
+# applying unchanged experiments again does not inject anything:
+#   kubectl delete podchaos --all -n chaos-testing)
 python3 chaos-runner.py --experiment chaos-mesh-pod-failure.yaml
 
 # Expected output:
@@ -514,23 +550,25 @@ python3 chaos-runner.py --experiment chaos-mesh-pod-failure.yaml
 # - Resilience assessment generated
 # - Recommendations provided
 
-# List all active chaos experiments
+# List all chaos experiments with their phase (Pending / Running / Completed)
 python3 chaos-runner.py --list-experiments
 
-# Get detailed status of specific experiment
-python3 chaos-runner.py --get-status pod-failure-demo
+# Get detailed status of a specific experiment (names come from the YAML files)
+python3 chaos-runner.py --get-status pod-kill-single
 
 # Generate report from metrics
-python3 chaos-runner.py --generate-report pod-failure-demo
+python3 chaos-runner.py --generate-report pod-kill-single
 
 # Delete experiment after testing
-python3 chaos-runner.py --delete pod-failure-demo
+python3 chaos-runner.py --delete pod-kill-single
 ```
 **Expected Output:** Resilience report showing:
 - Error rate stayed below threshold
 - Latency p99 within SLO
 - Pod restarts within normal parameters
 - System resilience assessment "PASSED"
+
+> **Note:** The metrics come from Prometheus at `localhost:9090` (port-forward it first: `kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090`) and look for `http_requests_total` and `request_duration_seconds_bucket`. If Prometheus is unreachable or returns no series for any of the queries, the report starts with a "No Prometheus data returned" warning instead of a real assessment. The nginx placeholder from Step 3.2 does not export these application metrics, so the error-rate and latency values are zero. Chaos Mesh 2.x has no single phase field, so the runner derives the phase from the `AllInjected`/`AllRecovered` conditions; `pod-kill` and `container-kill` are one-shot and count as completed once injected. The `Schedule` objects in the chaos YAML files keep injecting faults until deleted (`kubectl delete schedule --all -n chaos-testing`).
 
 ### Phase 4: Validation and Testing
 
@@ -543,7 +581,8 @@ python3 test-resilience.py
 # - SLO file structure and targets validation
 # - Chaos experiment YAML validity
 # - Chaos experiments have selectors and duration
-# - Backup automation script syntax
+# - Backup automation script syntax and behavior (kubectl/velero mocked)
+# - Chaos runner phase detection and report handling (kubectl mocked)
 # - SLO dashboard JSON validity
 
 # Expected output: All tests pass (OK)
@@ -555,30 +594,40 @@ python3 test-resilience.py
 ```
 TestSLODefinitions: 3 tests PASSED
 TestChaosExperiments: 4 tests PASSED
-TestBackupAutomation: 2 tests PASSED
+TestBackupAutomation: 5 tests PASSED
+TestChaosRunner: 7 tests PASSED
 TestSLODashboard: 2 tests PASSED
 
-Ran 11 tests in 0.234s - OK
+Ran 21 tests in 0.041s - OK
 ```
 
 **Next Steps:** Proceed to validation checks in Step 4.2
 
 #### Step 4.2: Validate SLO Compliance
 ```bash
-# Query SLO metrics in Prometheus
+# Query SLO metrics in Prometheus (port-forward first:
+#   kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090)
 PROM_URL="http://localhost:9090"
+query() { curl -s -G "$PROM_URL/api/v1/query" --data-urlencode "query=$1" | jq -c '.data.result[] | {slo: .metric.sloth_slo, value: .value[1]}'; }
 
-# Check availability SLI
-curl -s "$PROM_URL/api/v1/query?query=slo:api:availability:ratio" | jq '.data.result[].value'
+# SLO targets and error budgets loaded from the Sloth-generated rules
+query 'slo:objective:ratio{sloth_service="demo-app"}'
+query 'slo:error_budget:ratio{sloth_service="demo-app"}'
 
-# Check error budget remaining
-curl -s "$PROM_URL/api/v1/query?query=slo:api:availability:error_budget_ratio" | jq '.data.result[].value'
+# Availability SLI over 5m (1 - error ratio); needs demo-app traffic
+query '1 - slo:sli_error:ratio_rate5m{sloth_service="demo-app",sloth_slo="availability"}'
 
-# Check latency SLI (p99)
-curl -s "$PROM_URL/api/v1/query?query=slo:api:latency:p99" | jq '.data.result[].value'
+# Error budget remaining over the SLO period; needs demo-app traffic
+query 'slo:period_error_budget_remaining:ratio{sloth_service="demo-app",sloth_slo="availability"}'
 
-# Expected: availability > 0.999, error_budget < 1.0 (not exhausted), latency_p99 < 0.5s
+# Latency SLI: share of requests slower than 500ms over 5m; needs demo-app traffic
+query 'slo:sli_error:ratio_rate5m{sloth_service="demo-app",sloth_slo="latency"}'
+
+# Expected: objectives 0.999 (availability), 0.99 (latency, throughput). With traffic:
+# availability > 0.999, error budget remaining > 0 (not exhausted), slow-request ratio < 0.01
 ```
+
+> **Note:** The SLIs are computed from `http_requests_total{job="demo-app"}` and `http_request_duration_seconds_bucket{job="demo-app"}`. Until an instrumented demo-app is scraped (a ServiceMonitor with `job="demo-app"`), only the objectives and error budgets return values and the SLI queries return an empty result. The Sloth `PrometheusRule` must carry Prometheus's `ruleSelector` label (`release=kube-prometheus-stack`); `generate-slo-rules.sh` adds it, otherwise Prometheus silently ignores the rules. The `slo:api:*` rules in `slo-definitions.yaml` (used by `slo-dashboard.json`) are stored in a `ConfigMap`, which the Prometheus Operator does not load as rules.
 
 #### Step 4.3: Validate DR Readiness
 ```bash
@@ -605,9 +654,15 @@ kubectl apply --dry-run=client -f chaos-workflow.yaml
 
 # Expected: All files pass validation
 
+# Also valid: a single NetworkChaos experiment
+kubectl apply --dry-run=client -f chaos-network-delay.yaml
+
 # List all experiment templates in directory
-find . -name "chaos-*.yaml" -o -name "*-pod-kill.yaml" -o -name "*-workflow.yaml" | sort
+# (also matches chaos-demo-app.yaml and chaos-mesh-values.yaml, which are not experiments)
+find . -name "chaos-*.yaml" -o -name "*-pod-kill.yaml" -o -name "*-workflow.yaml" | grep -v '^./venv' | sort
 ```
+
+> **Note:** `chaos-experiment-pod-kill.yaml` also contains a LitmusChaos `ChaosEngine`, so `kubectl apply --dry-run=client -f chaos-experiment-pod-kill.yaml` reports `no matches for kind "ChaosEngine"` unless the LitmusChaos CRDs are installed (this chapter only installs Chaos Mesh). Its Chaos Mesh objects are valid. It also defines a `Schedule` named `pod-kill-schedule`, the same name as the one in `chaos-mesh-pod-failure.yaml`; applying both files replaces one with the other.
 
 ## Monitoring and Alerts
 
@@ -730,6 +785,8 @@ code/
 │   ├── chaos-experiment-pod-kill.yaml     # Extended pod kill experiments (Chaos Mesh + LitmusChaos)
 │   ├── chaos-experiment-network.yaml      # Extended network experiments (delay, loss, bandwidth, corrupt, duplicate)
 │   ├── chaos-workflow.yaml                # Multi-stage workflows (resilience-test, cascading, comprehensive)
+│   ├── chaos-demo-app.yaml                # chaos-testing namespace + nginx demo app (Step 3.2)
+│   ├── chaos-mesh-values.yaml             # Helm values for Chaos Mesh on Kind (Step 3.1)
 │   ├── chaos-runner.py                    # Python orchestrator for chaos experiments
 │   └── test-resilience.py                 # Test suite for SLO, chaos, and backup configs
 ```
@@ -757,10 +814,10 @@ This code directory supplements content on the official Platform Engineering Han
 
 ### No Orphan Files Identified
 
-All 24 files in this directory are referenced in the manuscript or serve support functions:
+All 26 files in this directory are referenced in the manuscript or serve support functions:
 - 5 SLO configuration files (referenced in Section 13.2)
 - 7 Backup/DR files (referenced in Section 13.3)
-- 8 Chaos engineering files (referenced in Section 13.4)
+- 10 Chaos engineering files (referenced in Section 13.4; includes the Kind/Gatekeeper helpers `chaos-demo-app.yaml` and `chaos-mesh-values.yaml`)
 - 1 Test suite (comprehensive validation)
 - 1 README (documentation)
 - 2 Python cache files (__pycache__)
@@ -768,6 +825,32 @@ All 24 files in this directory are referenced in the manuscript or serve support
 ### Website Discrepancies Found: None
 
 All code examples align with manuscript listings and section references.
+
+## Known Gaps and Ideas for Further Additions
+
+These two gaps remain when the chapter is run end to end on the local Kind cluster. They are not implemented here; the hints below are starting points.
+
+### 1. Backup schedules point at example namespaces that may not exist
+
+`velero-schedule.yaml` (and `platform-backup-config/values.yaml`) back up `team-alpha`, `team-beta` and `production`. If a namespace does not exist, Velero reports `fail to get the namespace <name> specified in backup.Spec.IncludedNamespaces`, the backup ends `PartiallyFailed`, and `disaster-recovery-plan.py` shows `[!] No backup errors: N backups have errors`. The hourly schedule repeats this every hour.
+
+Ideas:
+- Change `includedNamespaces` to namespaces that exist in your cluster (check with `kubectl get ns`) and re-apply `velero-schedule.yaml`.
+- Or pause a schedule while you work through the chapter: `velero schedule pause hourly-backup` (resume with `velero schedule unpause hourly-backup`).
+- Add a pre-flight check to `backup-automation.py` (or `disaster-recovery-plan.py`) that compares each schedule's `includedNamespaces` with `kubectl get ns` and warns about missing ones.
+- To see the cause of a failed backup: `kubectl logs -n velero deploy/velero | grep "<backup-name>"` (the `velero backup describe` output cannot be downloaded from your workstation, see Step 2.4).
+
+### 2. The SLO dashboard and SLI queries have no data
+
+Two things are missing for real SLO data:
+- **The rules behind the dashboard are not loaded.** `slo-definitions.yaml` is a `ConfigMap`, and the Prometheus Operator does not read rules from a ConfigMap, so the `slo:api:*` series used by `slo-dashboard.json` never exist. Only the Sloth-generated rules (`demo-app-slos`) are loaded.
+- **Nothing produces the metrics.** The Sloth SLOs read `http_requests_total{job="demo-app"}` and `http_request_duration_seconds_bucket{job="demo-app"}`, which the nginx placeholder does not export.
+
+Ideas:
+- Turn the `groups:` content of the `slo-definitions` `ConfigMap` into a `PrometheusRule` (`spec.groups`) labelled `release: kube-prometheus-stack` (the label Prometheus selects on), then point the dashboard panels at the rule names that exist, or keep the `slo:api:*` names in both places.
+- Add a small instrumented sample app that exports `http_requests_total` (with a `code` label) and `http_request_duration_seconds_bucket`, with a `Service` and a `ServiceMonitor` that results in `job="demo-app"`. Give it a `docker.io/` image and resource limits so it passes the Gatekeeper policies.
+- Add a traffic generator (a small `Job` or `CronJob` calling the app, including some failing and slow requests) so the availability, latency and error-budget queries in Step 4.2, the dashboard and the burn-rate alerts show real values.
+- Re-run the chaos experiments from Phase 3 against that app and watch the SLIs and `chaos-runner.py --generate-report` change, which turns the report from the "No Prometheus data" warning into a real assessment.
 
 ## Recommendations
 

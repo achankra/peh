@@ -18,7 +18,7 @@ Usage:
 import json
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple
 import logging
 
@@ -170,6 +170,9 @@ class VeleroBackupManager:
         
         try:
             data = json.loads(stdout)
+            # With exactly one backup, velero returns a bare Backup, not a BackupList
+            if data.get("kind") == "Backup":
+                return [data]
             return data.get("items", [])
         except json.JSONDecodeError:
             logger.error("Failed to parse backup list JSON")
@@ -214,8 +217,9 @@ class VeleroBackupManager:
                 continue
             
             status = self.get_backup_status(backup_name)
-            phase = status.get("status", {}).get("phase")
-            
+            # `velero backup describe -o json` reports phase at the top level
+            phase = status.get("phase") or status.get("status", {}).get("phase")
+
             # Check backup phase
             is_valid = phase == "Completed"
             validation_results[backup_name] = is_valid
@@ -236,7 +240,7 @@ class VeleroBackupManager:
         """
         backups = self.list_backups()
         freshness_results = {}
-        threshold_time = datetime.utcnow() - timedelta(days=days_threshold)
+        threshold_time = datetime.now(timezone.utc) - timedelta(days=days_threshold)
         
         logger.info(f"Checking backup freshness (threshold: {days_threshold} days)...")
         
@@ -259,7 +263,7 @@ class VeleroBackupManager:
                 is_fresh = backup_time > threshold_time
                 freshness_results[backup_name] = is_fresh
                 
-                age_hours = (datetime.utcnow() - backup_time).total_seconds() / 3600
+                age_hours = (datetime.now(timezone.utc) - backup_time).total_seconds() / 3600
                 status = "FRESH" if is_fresh else "STALE"
                 logger.info(f"Backup {backup_name}: {status} ({age_hours:.1f} hours old)")
             except ValueError:
@@ -322,7 +326,7 @@ class VeleroBackupManager:
             True if cleanup successful
         """
         backups = self.list_backups()
-        threshold_time = datetime.utcnow() - timedelta(days=days_to_keep)
+        threshold_time = datetime.now(timezone.utc) - timedelta(days=days_to_keep)
         deleted_count = 0
         
         logger.info(f"Cleaning up backups older than {days_to_keep} days...")

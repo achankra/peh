@@ -9,21 +9,16 @@
 #
 # CONNECTION SECRETS IN CROSSPLANE v2
 # ------------------------------------
-# In Crossplane v1, individual composed resources each wrote their own Secret via
-# writeConnectionSecretToRef. In v2 this field is removed from composed resources.
-# Instead, the composition pipeline defines connectionDetails on each resource:
+# In Crossplane v1, the XR's connection details were merged into one Secret that the
+# claim controller copied into the claim's namespace (writeConnectionSecretToRef).
+# Crossplane v2 removed that: the Composition no longer has
+# writeConnectionSecretsToNamespace, so the XR gets no connection secret and the claim
+# receives nothing, even though the claim CRD still accepts writeConnectionSecretToRef.
 #
-#   resource A → connectionDetails: [endpoint, port]  ─┐
-#   resource B → connectionDetails: [username, password] ─┼─► function collects all
-#                                                         │    and merges into one
-#                                                         ▼
-#                               Composite Resource (XR) connection secret
-#                                                         │
-#                                                         ▼
-#                               Claim publishConnectionDetailsTo target
-#
-# The claim (demo-app-database.yaml) declares publishConnectionDetailsTo: to say
-# where the merged secret should land. No composed resource writes a secret directly.
+# This composition therefore composes the application's Secret itself
+# (app-connection-secret below). Its name (<claim-name>-connection) and namespace are
+# patched in from the claim via spec.claimRef. The connectionDetails entries on the
+# other resources are kept for illustration; v2 does not publish them anywhere.
 
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
@@ -36,8 +31,8 @@ spec:
   compositeTypeRef:
     apiVersion: database.platform.io/v1alpha1
     kind: PostgreSQLInstance
-  # Crossplane v2: writeConnectionSecretsToNamespace removed from Compositions.
-  # Connection details are published via publishConnectionDetailsTo on the XR/Claim.
+  # Crossplane v2: writeConnectionSecretsToNamespace removed from Compositions;
+  # see CONNECTION SECRETS above for how the app gets its credentials.
   mode: Pipeline
   pipeline:
     - step: patch-and-transform
@@ -56,13 +51,23 @@ spec:
             patches:
               - type: FromCompositeFieldPath
                 fromFieldPath: spec.parameters.tier
-                toFieldPath: spec.forProvider.manifest.spec.resources.requests.memory
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].resources.requests.memory
                 transforms:
                   - type: map
                     map:
                       development: "256Mi"
                       staging: "512Mi"
                       production: "1Gi"
+              # The limit must stay at or above the request, so patch it with the tier too
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tier
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].resources.limits.memory
+                transforms:
+                  - type: map
+                    map:
+                      development: "512Mi"
+                      staging: "1Gi"
+                      production: "2Gi"
           - name: region-settings
             patches:
               # For cloud provider compositions (e.g. provider-aws), patch region to
@@ -84,12 +89,17 @@ spec:
                     kind: Namespace
                     metadata:
                       name: databases
+                      # Required by the Chapter 11 namespace-must-have-team policy
+                      labels:
+                        team: platform
+                        cost-center: "10001"
+                        environment: dev
             patches:
               - type: PatchSet
                 patchSetName: common-labels
 
-          # Credentials secret — created by the composition so connection details
-          # can be surfaced via connectionDetails below (v2 pattern).
+          # Credentials secret read by the PostgreSQL Deployment. The composition owns it,
+          # so it replaces any db-credentials Secret created by hand beforehand.
           # In production, replace this with an ExternalSecret from your secrets manager.
           - name: db-secret
             base:
@@ -109,9 +119,7 @@ spec:
                       # In production use ExternalSecrets or a secrets manager.
                       # This static value is used for the local Kind demo only.
                       password: change-me-in-production
-            # connectionDetails: v2 pattern — the function collects these values from
-            # this resource and merges them into the single XR-level connection secret.
-            # No writeConnectionSecretToRef is used anywhere.
+            # connectionDetails: illustrative only; v2 does not publish these (see header).
             connectionDetails:
               - name: username
                 type: FromValue
@@ -168,7 +176,9 @@ spec:
                         spec:
                           containers:
                             - name: postgresql
-                              image: postgres:15-alpine
+                              # Fully qualified: the allowed-registries policy matches the
+                              # "docker.io/" prefix, so a bare "postgres:..." is rejected
+                              image: docker.io/library/postgres:15-alpine
                               ports:
                                 - containerPort: 5432
                               env:
@@ -219,12 +229,10 @@ spec:
                   - type: string
                     string:
                       type: Format
-                      fmt: "postgres:%s-alpine"
+                      fmt: "docker.io/library/postgres:%s-alpine"
 
-          # Service to expose PostgreSQL — also publishes the network connection details.
-          # endpoint and port are collected here; username and password come from db-secret above.
-          # The function merges all four into the single secret written to the Claim's
-          # publishConnectionDetailsTo target.
+          # Service to expose PostgreSQL. The application's connection secret
+          # (endpoint, port, username, password) is composed by app-connection-secret below.
           - name: db-service
             base:
               apiVersion: kubernetes.crossplane.io/v1alpha2
@@ -256,3 +264,39 @@ spec:
               - name: port
                 type: FromValue
                 value: "5432"
+
+          # Connection secret for the application, in the Claim's own namespace.
+          # Crossplane v2 no longer creates this from connectionDetails (the
+          # Composition has no writeConnectionSecretsToNamespace), so the composition
+          # composes the Secret itself. Its name and namespace come from the Claim.
+          - name: app-connection-secret
+            base:
+              apiVersion: kubernetes.crossplane.io/v1alpha2
+              kind: Object
+              spec:
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: Secret
+                    metadata:
+                      name: placeholder        # patched to <claim-name>-connection
+                      namespace: placeholder   # patched to the Claim's namespace
+                    type: Opaque
+                    stringData:
+                      endpoint: postgresql.databases.svc.cluster.local
+                      port: "5432"
+                      username: platform
+                      # Same static demo value as db-secret above
+                      password: change-me-in-production
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.claimRef.name
+                toFieldPath: spec.forProvider.manifest.metadata.name
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-connection"
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.claimRef.namespace
+                toFieldPath: spec.forProvider.manifest.metadata.namespace

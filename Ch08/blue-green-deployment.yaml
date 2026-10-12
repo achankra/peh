@@ -21,6 +21,10 @@ metadata:
   name: staging
   labels:
     app: myapp
+    # Required by the Gatekeeper policy namespace-must-have-team (Ch02/Ch11)
+    team: platform
+    environment: staging
+    cost-center: "1000"
 
 ---
 # Blue Deployment (Current Production)
@@ -51,7 +55,7 @@ spec:
         color: blue
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
+        prometheus.io/port: "5001"
         prometheus.io/path: "/metrics"
     spec:
       # Grace period for graceful shutdown
@@ -59,12 +63,12 @@ spec:
       
       containers:
       - name: app
-        image: myregistry.azurecr.io/myapp:v1.0.0
+        image: ghcr.io/myorg/ch8-demo-app:v1.0.0
         imagePullPolicy: IfNotPresent
         
         ports:
         - name: http
-          containerPort: 8080
+          containerPort: 5001
           protocol: TCP
         
         # Resource management
@@ -79,7 +83,7 @@ spec:
         # Startup probe - allows time for slow starting applications
         startupProbe:
           httpGet:
-            path: /health/startup
+            path: /health
             port: http
           initialDelaySeconds: 0
           periodSeconds: 10
@@ -89,7 +93,7 @@ spec:
         # Liveness probe - restart if application becomes unresponsive
         livenessProbe:
           httpGet:
-            path: /health/live
+            path: /health
             port: http
           initialDelaySeconds: 30
           periodSeconds: 10
@@ -99,7 +103,7 @@ spec:
         # Readiness probe - exclude unhealthy pods from traffic
         readinessProbe:
           httpGet:
-            path: /health/ready
+            path: /health
             port: http
           initialDelaySeconds: 10
           periodSeconds: 5
@@ -155,19 +159,19 @@ spec:
         color: green
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
+        prometheus.io/port: "5001"
         prometheus.io/path: "/metrics"
     spec:
       terminationGracePeriodSeconds: 30
       
       containers:
       - name: app
-        image: myregistry.azurecr.io/myapp:v1.1.0
+        image: ghcr.io/myorg/ch8-demo-app:v1.1.0
         imagePullPolicy: IfNotPresent
         
         ports:
         - name: http
-          containerPort: 8080
+          containerPort: 5001
           protocol: TCP
         
         resources:
@@ -180,7 +184,7 @@ spec:
         
         startupProbe:
           httpGet:
-            path: /health/startup
+            path: /health
             port: http
           initialDelaySeconds: 0
           periodSeconds: 10
@@ -189,7 +193,7 @@ spec:
         
         livenessProbe:
           httpGet:
-            path: /health/live
+            path: /health
             port: http
           initialDelaySeconds: 30
           periodSeconds: 10
@@ -198,7 +202,7 @@ spec:
         
         readinessProbe:
           httpGet:
-            path: /health/ready
+            path: /health
             port: http
           initialDelaySeconds: 10
           periodSeconds: 5
@@ -317,32 +321,9 @@ spec:
         periodSeconds: 60
 
 ---
-# HorizontalPodAutoscaler for Green
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: myapp-green-hpa
-  namespace: staging
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: myapp-green
-  minReplicas: 0
-  maxReplicas: 10
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
-  - type: Resource
-    resource:
-      name: memory
-      target:
-        type: Utilization
-        averageUtilization: 80
+# No HPA for Green: it starts at 0 replicas, and an HPA cannot scale to zero
+# (minReplicas must be >= 1). Green is scaled by hand during the cutover; add an
+# HPA for it once it is promoted.
 
 ---
 # ConfigMap with deployment procedures
@@ -368,7 +349,7 @@ data:
     echo "Testing green deployment..."
     kubectl run green-test --image=curlimages/curl -n $NAMESPACE \
       --rm -it --restart=Never -- \
-      curl -f http://myapp-green:8080/health/ready
+      curl -f http://myapp-green:8080/health
     echo "Green deployment health check passed"
   
   # Switch traffic from blue to green
@@ -401,7 +382,7 @@ data:
     
     echo "2. Running health checks on green..."
     POD=$(kubectl get pods -n $NAMESPACE -l app=myapp,color=green -o jsonpath='{.items[0].metadata.name}')
-    kubectl exec -it $POD -n $NAMESPACE -- curl -f localhost:8080/health/ready
+    kubectl exec $POD -n $NAMESPACE -- python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:5001/health').read().decode())"
     
     echo "3. Validation tests (replace with your test suite)..."
     # kubectl run smoke-tests --image=myregistry/tests:latest -n $NAMESPACE...

@@ -1,0 +1,24 @@
+# Scrape the locally-run instrumented app (instrument-app.py) from the cluster
+#
+# instrument-app.py runs on your workstation (port 8000), outside the Kind
+# cluster, so Prometheus has no Service to discover. A ScrapeConfig lets the
+# Prometheus Operator scrape a static host:port; host.docker.internal is how
+# pods in Kind (Docker Desktop) reach the host machine.
+#
+# Prometheus only loads ScrapeConfigs whose "release" label matches its Helm
+# release (see Phase 9). The release is named kube-prometheus-stack whether
+# the stack came from Chapter 2 (Flux) or the Chapter 4 helm install.
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: platform-app
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  jobName: platform-app
+  scrapeInterval: 15s
+  metricsPath: /metrics
+  staticConfigs:
+    - targets: ["host.docker.internal:8000"]

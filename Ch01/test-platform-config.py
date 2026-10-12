@@ -30,6 +30,8 @@ from typing import Dict, Any
 class TestResult:
     """Store test result."""
 
+    __test__: bool = False  # not a pytest test class
+
     def __init__(self, name: str, passed: bool, message: str = ""):
         self.name = name
         self.passed = passed
@@ -236,7 +238,7 @@ class PlatformConfigTests:
             ), "Missing 'infrastructure' section"
             infra = self.config["infrastructure"]
 
-            assert "primary-cloud" in infra, "Missing 'primary-cloud'"
+            assert "primary-runtime" in infra, "Missing 'primary-runtime'"
             assert "kubernetes" in infra, "Missing 'kubernetes' configuration"
             assert "databases" in infra, "Missing 'databases' configuration"
 
@@ -380,6 +382,70 @@ def load_yaml_config(filename: str) -> Dict:
     except FileNotFoundError:
         print(f"Error: Config file not found: {filename}")
         sys.exit(1)
+
+
+def _load_test_suite() -> PlatformConfigTests:
+    """Load platform-config.yaml into a PlatformConfigTests suite."""
+    config = load_yaml_config("platform-config.yaml")
+    return PlatformConfigTests(config)
+
+
+_suite = _load_test_suite()
+
+
+def test_config_structure():
+    result = _suite.test_config_structure()
+    assert result.passed, result.message
+
+
+def test_platform_principles():
+    result = _suite.test_platform_principles()
+    assert result.passed, result.message
+
+
+def test_team_structure():
+    result = _suite.test_team_structure()
+    assert result.passed, result.message
+
+
+def test_golden_paths():
+    result = _suite.test_golden_paths()
+    assert result.passed, result.message
+
+
+def test_security_configuration():
+    result = _suite.test_security_configuration()
+    assert result.passed, result.message
+
+
+def test_observability():
+    result = _suite.test_observability()
+    assert result.passed, result.message
+
+
+def test_self_service_capabilities():
+    result = _suite.test_self_service_capabilities()
+    assert result.passed, result.message
+
+
+def test_infrastructure():
+    result = _suite.test_infrastructure()
+    assert result.passed, result.message
+
+
+def test_api_standards():
+    result = _suite.test_api_standards()
+    assert result.passed, result.message
+
+
+def test_policies():
+    result = _suite.test_policies()
+    assert result.passed, result.message
+
+
+def test_support_configuration():
+    result = _suite.test_support_configuration()
+    assert result.passed, result.message
 
 
 if __name__ == "__main__":

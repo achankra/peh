@@ -3,17 +3,16 @@
 Chapter 14: Measure AI Impact on Platform Metrics
 ===================================================
 Measures the impact of AI-augmented platform tools on key metrics
-including MTTR, alert-to-resolution time, and developer productivity.
+including MTTR, alert-to-acknowledgment time, and diagnosis speed.
 
 Usage:
-    python measure-ai-impact.py [--demo]
+    python measure-ai-impact.py
 
-Prerequisites:
-    - Access to incident management data (or use --demo mode)
+The script runs on generated, illustrative demo incidents. To measure your
+own platform, build a list of Incident objects from your incident management
+data and pass it to print_report().
 """
 
-import json
-import sys
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import List

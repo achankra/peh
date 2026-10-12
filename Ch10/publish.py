@@ -33,6 +33,12 @@ GITHUB_BRANCH = os.environ.get("GITHUB_BRANCH", "main")
 # If templates/ is at Ch10/templates/ in the repo, set this to "Ch10".
 REPO_PREFIX = os.environ.get("REPO_PREFIX", "")
 
+# --local: template.yaml files are served by a small nginx Deployment in
+# the Backstage namespace instead of being fetched from GitHub.
+LOCAL_SERVER = "template-server"
+LOCAL_PORT = 8080
+LOCAL_HOST = f"{LOCAL_SERVER}.{BACKSTAGE_NS}.svc.cluster.local:{LOCAL_PORT}"
+
 
 def kubectl(*args, **kwargs):
     """Run a kubectl command and return the result."""
@@ -46,8 +52,10 @@ def kubectl(*args, **kwargs):
 class TemplatePublisher:
     """Publish templates to Backstage."""
 
-    def __init__(self, backstage_url: str, token: str = ""):
+    def __init__(self, backstage_url: str, token: str = "",
+                 local: bool = False):
         self.backstage_url = backstage_url.rstrip("/")
+        self.local = local
         self.headers = {"Content-Type": "application/json"}
         if token:
             self.headers["Authorization"] = f"Bearer {token}"
@@ -95,11 +103,11 @@ class TemplatePublisher:
     # ── GitHub integration setup ────────────────────────────────
 
     @staticmethod
-    def setup_github_token(github_token: str):
-        """Update Backstage's GitHub integration token.
+    def update_app_config(mutate, summary: str, manual_hint: list[str]):
+        """Patch Backstage's app-config ConfigMap and restart Backstage.
 
-        Finds the app-config ConfigMap, patches the GitHub token,
-        and restarts Backstage.
+        `mutate(config)` edits the parsed app-config in place and returns
+        True if it changed anything (no change -> no restart).
         """
         # ── find the app-config ConfigMap ───────────────────────
         result = kubectl("get", "cm", "-n", BACKSTAGE_NS, "-o", "json")
@@ -124,32 +132,16 @@ class TemplatePublisher:
         if not app_config_cm:
             print("Could not find Backstage app-config ConfigMap.")
             print("Add this manually to your app-config.yaml:")
-            print("  integrations:")
-            print("    github:")
-            print(f"      - host: github.com")
-            print(f"        token: {github_token}")
+            for line in manual_hint:
+                print(line)
             return False
 
         cm_name = app_config_cm["metadata"]["name"]
         config = yaml.safe_load(app_config_cm["data"][app_config_key])
 
-        # ── update or add GitHub integration ────────────────────
-        integrations = config.setdefault("integrations", {})
-        github_list = integrations.setdefault("github", [])
-
-        # Find existing github.com entry or create one
-        gh_entry = None
-        for entry in github_list:
-            if entry.get("host") == "github.com":
-                gh_entry = entry
-                break
-        if gh_entry:
-            gh_entry["token"] = github_token
-        else:
-            github_list.append({
-                "host": "github.com",
-                "token": github_token,
-            })
+        if not mutate(config):
+            print(f"{cm_name}: {summary} already configured")
+            return True
 
         # ── apply the updated ConfigMap ─────────────────────────
         app_config_cm["data"][app_config_key] = yaml.dump(
@@ -165,7 +157,7 @@ class TemplatePublisher:
             print(f"Failed to patch ConfigMap: {result.stderr.strip()}")
             return False
 
-        print(f"Updated GitHub token in {cm_name}")
+        print(f"Updated {summary} in {cm_name}")
 
         # ── restart Backstage ───────────────────────────────────
         for workload in ["deployment", "statefulset"]:
@@ -192,7 +184,56 @@ class TemplatePublisher:
         print(" done")
         return True
 
+    @classmethod
+    def setup_github_token(cls, github_token: str):
+        """Update Backstage's GitHub integration token."""
+        def mutate(config):
+            github_list = config.setdefault("integrations", {}).setdefault(
+                "github", [])
+            # Find existing github.com entry or create one
+            for entry in github_list:
+                if entry.get("host") == "github.com":
+                    entry["token"] = github_token
+                    return True
+            github_list.append({"host": "github.com", "token": github_token})
+            return True
+
+        return cls.update_app_config(mutate, "GitHub token", [
+            "  integrations:",
+            "    github:",
+            "      - host: github.com",
+            f"        token: {github_token}",
+        ])
+
+    @classmethod
+    def allow_local_server(cls):
+        """Let Backstage's URL reader fetch from the in-cluster server.
+
+        Backstage only reads from hosts listed in `backend.reading.allow`
+        (plus the hosts under `integrations`), so the template server's
+        host has to be added once.
+        """
+        def mutate(config):
+            allow = config.setdefault("backend", {}).setdefault(
+                "reading", {}).setdefault("allow", [])
+            if any(e.get("host") == LOCAL_HOST for e in allow):
+                return False
+            allow.append({"host": LOCAL_HOST})
+            return True
+
+        return cls.update_app_config(mutate, "URL reader allow-list", [
+            "  backend:",
+            "    reading:",
+            "      allow:",
+            f"        - host: {LOCAL_HOST}",
+        ])
+
     # ── publishing ──────────────────────────────────────────────
+
+    def _local_url(self, template: TemplateMetadata) -> str:
+        """URL of a template on the in-cluster template server."""
+        return (f"http://{LOCAL_HOST}/{template.name}/{template.version}"
+                "/template.yaml")
 
     def _github_url(self, template: TemplateMetadata) -> str:
         """Build the GitHub URL for a template.
@@ -218,7 +259,8 @@ class TemplatePublisher:
                 print(f"  - {error}")
             return False
 
-        location_target = self._github_url(template)
+        location_target = (self._local_url(template) if self.local
+                           else self._github_url(template))
         catalog_url = f"{self.backstage_url}/api/catalog/locations"
 
         response = requests.post(
@@ -329,13 +371,80 @@ def ensure_port_forward():
     return False
 
 
+def deploy_template_server(templates: list[TemplateMetadata]) -> bool:
+    """Serve every template.yaml from an nginx Deployment in the cluster.
+
+    The files go into a ConfigMap and are mounted at
+    /usr/share/nginx/html/<name>/<version>/template.yaml, which is the
+    path TemplatePublisher._local_url() registers with Backstage.
+    """
+    print("Deploying template server in cluster...", end="", flush=True)
+    labels = {"app": LOCAL_SERVER}
+    data, items = {}, []
+    for t in templates:
+        key = f"{t.name}__{t.version}"
+        data[key] = (t.path / "template.yaml").read_text()
+        items.append({"key": key,
+                      "path": f"{t.name}/{t.version}/template.yaml"})
+
+    manifests = [
+        {"apiVersion": "v1", "kind": "ConfigMap",
+         "metadata": {"name": LOCAL_SERVER, "namespace": BACKSTAGE_NS},
+         "data": data},
+        {"apiVersion": "apps/v1", "kind": "Deployment",
+         "metadata": {"name": LOCAL_SERVER, "namespace": BACKSTAGE_NS},
+         "spec": {
+             "replicas": 1,
+             "selector": {"matchLabels": labels},
+             "template": {
+                 "metadata": {"labels": labels},
+                 "spec": {
+                     "containers": [{
+                         "name": "nginx",
+                         # Fully qualified + limits: the cluster's Gatekeeper
+                         # policies (Ch03/Ch11) reject anything else.
+                         "image": "docker.io/library/nginx:alpine",
+                         "ports": [{"containerPort": 80}],
+                         "resources": {
+                             "requests": {"cpu": "10m", "memory": "16Mi"},
+                             "limits": {"cpu": "100m", "memory": "64Mi"}},
+                         "volumeMounts": [{
+                             "name": "templates",
+                             "mountPath": "/usr/share/nginx/html"}],
+                     }],
+                     "volumes": [{
+                         "name": "templates",
+                         "configMap": {"name": LOCAL_SERVER,
+                                       "items": items}}],
+                 }}}},
+        {"apiVersion": "v1", "kind": "Service",
+         "metadata": {"name": LOCAL_SERVER, "namespace": BACKSTAGE_NS},
+         "spec": {"selector": labels,
+                  "ports": [{"port": LOCAL_PORT, "targetPort": 80}]}},
+    ]
+    result = kubectl("apply", "-f", "-", input=json.dumps(
+        {"apiVersion": "v1", "kind": "List", "items": manifests}))
+    if result.returncode != 0:
+        print(f" failed\n{result.stderr.strip()}")
+        return False
+
+    result = kubectl("rollout", "status", f"deployment/{LOCAL_SERVER}",
+                     "-n", BACKSTAGE_NS, "--timeout=120s")
+    if result.returncode != 0:
+        print(f" failed\n{result.stdout.strip()}{result.stderr.strip()}")
+        return False
+    print(" ready")
+    return True
+
+
 def main():
     backstage_url = os.environ.get("BACKSTAGE_URL", "http://localhost:7007")
     backstage_token = os.environ.get("BACKSTAGE_TOKEN", "")
     refresh = "--refresh" in sys.argv
     setup_github = "--setup-github" in sys.argv
+    local = "--local" in sys.argv
 
-    publisher = TemplatePublisher(backstage_url, backstage_token)
+    publisher = TemplatePublisher(backstage_url, backstage_token, local)
 
     # ── one-time GitHub token setup ─────────────────────────────
     if setup_github:
@@ -358,8 +467,18 @@ def main():
         publisher.remove_all()
         print()
 
-    # ── register templates using GitHub URLs ────────────────────
-    print(f"Publishing templates from {GITHUB_REPO} ({GITHUB_BRANCH})...")
+    # ── --local: serve the templates from inside the cluster ────
+    if local:
+        if not publisher.allow_local_server():
+            sys.exit(1)
+        ensure_port_forward()  # a Backstage restart drops the forward
+        if not deploy_template_server(publisher.discover_templates(Path("."))):
+            sys.exit(1)
+        print("Publishing templates from the in-cluster template server...")
+    else:
+        print(f"Publishing templates from {GITHUB_REPO} ({GITHUB_BRANCH})...")
+
+    # ── register templates ──────────────────────────────────────
     results = publisher.publish_all(Path("."))
 
     print(f"\nPublished: {len(results['published'])}")
@@ -376,10 +495,14 @@ def main():
                 print(f"  kubectl logs -n {BACKSTAGE_NS}"
                       f" -l app.kubernetes.io/name=backstage"
                       f" --tail=30")
-                print("Common issue: GitHub integration token expired."
-                      " Fix with:")
-                print("  export GITHUB_TOKEN=ghp_...")
-                print("  python3 publish.py --setup-github")
+                if local:
+                    print("Common issue: the template server host is not in"
+                          " backend.reading.allow. Re-run with --local.")
+                else:
+                    print("Common issue: GitHub integration token expired."
+                          " Fix with:")
+                    print("  export GITHUB_TOKEN=ghp_...")
+                    print("  python3 publish.py --setup-github")
 
 
 if __name__ == "__main__":

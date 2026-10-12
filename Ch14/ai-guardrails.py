@@ -13,6 +13,7 @@ This framework ensures AI agents operate safely within defined boundaries.
 
 import json
 import time
+import uuid
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Set, Optional, Tuple, Callable
 from enum import Enum
@@ -247,7 +248,7 @@ class ApprovalManager:
         Returns:
             ApprovalRequest
         """
-        request_id = f"approval-{int(time.time())}"
+        request_id = f"approval-{uuid.uuid4().hex[:8]}"
         
         request = ApprovalRequest(
             request_id=request_id,
@@ -396,7 +397,7 @@ class GuardrailsFramework:
         Returns:
             GuardedAction object
         """
-        action_id = f"act-{int(time.time())}"
+        action_id = f"act-{uuid.uuid4().hex[:8]}"
         
         action = GuardedAction(
             action_id=action_id,
@@ -445,13 +446,24 @@ class GuardrailsFramework:
     def request_approval_if_needed(self, action: GuardedAction) -> Optional[ApprovalRequest]:
         """
         Request approval if action requires it.
-        
+
+        Actions that fail the safety check are rejected outright: a human
+        is never asked to approve something the guardrails already forbid.
+
         Args:
             action: GuardedAction
-            
+
         Returns:
-            ApprovalRequest if approval needed, None otherwise
+            ApprovalRequest if approval needed, None otherwise (check
+            action.approval_status to tell auto-approved from rejected)
         """
+        safe, violations = self.is_safe(action)
+        if not safe:
+            action.approval_status = ApprovalStatus.REJECTED
+            self.audit_logger.log_action(action, 'rejected_unsafe',
+                                        {'violations': violations})
+            return None
+
         if self.allowlist.get_required_approval(action.severity):
             request = self.approval_manager.create_approval_request(
                 action,
@@ -469,13 +481,23 @@ class GuardrailsFramework:
     def execute_action(self, action: GuardedAction) -> bool:
         """
         Execute action if approved.
-        
+
+        The safety check runs again here, so no approval status can
+        override the allowlist or confidence thresholds.
+
         Args:
             action: GuardedAction to execute
-            
+
         Returns:
             True if executed successfully
         """
+        safe, violations = self.is_safe(action)
+        if not safe:
+            action.error = "Action failed safety checks"
+            self.audit_logger.log_action(action, 'execution_blocked',
+                                        {'error': 'unsafe', 'violations': violations})
+            return False
+
         if action.approval_status == ApprovalStatus.PENDING:
             action.error = "Action requires approval"
             self.audit_logger.log_action(action, 'execution_blocked',
@@ -534,13 +556,13 @@ def main():
         # High confidence, low-risk (should auto-approve)
         ('triage_agent', 'acknowledge_alert', 'alert-123', 0.8, ActionSeverity.LOW),
         
-        # Medium confidence, medium-risk (requires approval)
-        ('remediation_agent', 'scale_service', 'api-service', 0.7, ActionSeverity.MEDIUM),
-        
-        # High confidence, high-risk (requires approval)
+        # Sufficient confidence, medium-risk (requires approval)
+        ('remediation_agent', 'scale_service', 'api-service', 0.8, ActionSeverity.MEDIUM),
+
+        # High confidence, but deploy_version is outside this agent's allowlist (blocked)
         ('remediation_agent', 'deploy_version', 'api-service', 0.9, ActionSeverity.HIGH),
-        
-        # Low confidence, critical (should be rejected)
+
+        # Low confidence, critical, not allowlisted (blocked)
         ('remediation_agent', 'delete_data', 'database', 0.5, ActionSeverity.CRITICAL),
     ]
     
@@ -571,7 +593,9 @@ def main():
         # Request approval if needed
         approval_req = framework.request_approval_if_needed(action)
         
-        if approval_req:
+        if action.approval_status == ApprovalStatus.REJECTED:
+            print(f"  Approval: NOT REQUESTED (blocked by safety check)")
+        elif approval_req:
             print(f"  Approval: REQUIRED ({approval_req.request_id})")
             # Simulate approval
             framework.approval_manager.approve_action(
@@ -585,7 +609,7 @@ def main():
         
         # Execute
         success = framework.execute_action(action)
-        print(f"  Execution: {'SUCCESS' if success else 'FAILED'}")
+        print(f"  Execution: {'SUCCESS' if success else 'BLOCKED'}")
     
     # Statistics
     stats = framework.get_statistics()

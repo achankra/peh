@@ -12,7 +12,7 @@ info:
     name: MIT
 
 servers:
-  - url: http://localhost:5000
+  - url: http://localhost:5001
     description: Development server
   - url: https://api.platform.internal
     description: Production server
@@ -307,11 +307,11 @@ components:
         id:
           type: string
           description: Team identifier
-          example: platform-team
+          example: platform
         name:
           type: string
           description: Team name (slug format)
-          example: platform-team
+          example: platform
         display_name:
           type: string
           description: Human-readable team name
@@ -336,7 +336,7 @@ components:
           properties:
             name:
               type: string
-              example: team-platform-team
+              example: team-platform
             status:
               type: string
               enum: [pending, active, failed]
@@ -377,7 +377,7 @@ components:
           minLength: 3
           maxLength: 63
           description: Team identifier in slug format
-          example: platform-team
+          example: platform
         display_name:
           type: string
           minLength: 1
@@ -393,6 +393,16 @@ components:
           type: string
           description: Optional team description
           example: Platform infrastructure and tooling
+        environment:
+          type: string
+          enum: [dev, staging, prod]
+          default: dev
+          description: Value of the namespace `environment` label required by the Gatekeeper policy
+        cost_center:
+          type: string
+          pattern: '^[0-9]{4,6}$'
+          default: '1000'
+          description: Value of the namespace `cost-center` label required by the Gatekeeper policy
         resource_quota:
           type: object
           description: Optional custom resource quotas

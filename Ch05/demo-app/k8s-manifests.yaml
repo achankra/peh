@@ -48,14 +48,15 @@ spec:
         # Container image — tag is injected by the CI/CD pipeline using the
         # git commit SHA to ensure immutable, traceable deployments.
         # Never use :latest; it prevents rollback and breaks immutability.
-        # For local Kind testing: kind load docker-image platform-demo-app:<sha> --name peh
-        image: ghcr.io/company/platform-demo-app:IMAGE_TAG_PLACEHOLDER
-        imagePullPolicy: Always
+        # For local Kind testing: kind load docker-image platform-demo-app:<sha> --name platform-dev
+        image: ghcr.io/company/platform-demo-app:1.0.0
+        # so we do not pull it if we loaded it into the local Kind cluster
+        imagePullPolicy: IfNotPresent
 
         # Port configuration
         ports:
         - name: http
-          containerPort: 5000
+          containerPort: 5001
           protocol: TCP
 
         # Startup probe - gives app time to start

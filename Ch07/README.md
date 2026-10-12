@@ -30,7 +30,7 @@ By implementing these patterns, teams can:
 | File | Purpose | Chapter Section | Key Concepts |
 |------|---------|-----------------|--------------|
 | **openapi-spec.yaml** | OpenAPI 3.0 specification | Creating an onboarding API | RESTful design, versioning, error handling |
-| **onboarding-api.py** | Flask REST API implementation | Creating an onboarding API | Team/member management, namespace provisioning, RBAC setup |
+| **onboarding_api.py** | Flask REST API implementation | Creating an onboarding API | Team/member management, namespace provisioning, RBAC setup |
 | **services/teamService.js** | Node.js team service reference | Controller-Service-Repository pattern | Demonstrates service layer for team creation |
 
 ### Infrastructure & Templates
@@ -46,10 +46,10 @@ By implementing these patterns, teams can:
 
 | File | Purpose | Chapter Section | Key Concepts |
 |------|---------|-----------------|--------------|
-| **permission-delegation.py** | Permission delegation module | Enable self-service team management | Hierarchical permissions, role-based access, delegation validation |
-| **project-bootstrapper.py** | Project initialization automation | Bootstrapping new projects | Template libraries by archetype, language variants, atomic provisioning |
-| **audit-logger.py** | Audit logging module | Observability & compliance | Structured event logging, query interface, statistics |
-| **keycloak-groups.py** | Keycloak group provisioning | SSO integration for teams | Calls Keycloak Admin REST API to create `team-{name}-admins/developers/viewers` groups, assigns members, and ensures idempotency (group already exists = no-op) |
+| **permission_delegation.py** | Permission delegation module | Enable self-service team management | Hierarchical permissions, role-based access, delegation validation |
+| **project_bootstrapper.py** | Project initialization automation | Bootstrapping new projects | Template libraries by archetype, language variants, atomic provisioning |
+| **audit_logger.py** | Audit logging module | Observability & compliance | Structured event logging, query interface, statistics |
+| **keycloak_groups.py** | Keycloak group provisioning | SSO integration for teams | Calls Keycloak Admin REST API to create `{team}-admins/developers/viewers` groups, assigns members, and ensures idempotency (group already exists = no-op) |
 | **templates/backstage-template.yaml** | Backstage Scaffolder template for team onboarding | Developer portal integration (Ch6 + Ch7) | Uses `parameters.org` (replaces hardcoded org name); includes `output.links` block that surfaces the created repo URL and catalog entry URL after execution |
 
 ### Testing & Validation
@@ -63,6 +63,7 @@ By implementing these patterns, teams can:
 | File | Purpose | Chapter Section | Key Concepts |
 |------|---------|-----------------|--------------|
 | **load-secrets.sh** | Load GitHub token from Bitwarden (optional) | Secrets Management (cross-chapter) | Retrieves `GITHUB_TOKEN` and `GITHUB_ORG` from vault. Requires `bw-helper.sh` from Ch1. For local testing, set env vars manually instead. |
+| **.env_example** | Environment variable template | Secrets Management (fallback) | Template for a gitignored `.env` holding the API settings and `GITHUB_TOKEN` when you are not using Bitwarden. |
 
 ## Orphan Files
 
@@ -97,7 +98,8 @@ kubectl get nodes                       # Verify node(s) are Ready
 
 ### Python Dependencies
 ```bash
-pip install flask pyyaml kubernetes --break-system-packages
+python3 -m venv venv && source venv/bin/activate
+pip install flask pyyaml kubernetes 
 ```
 
 ### Node.js Dependencies
@@ -112,29 +114,16 @@ npm install --save-dev jest supertest
 - Persistent volume for audit logs (optional but recommended for production)
 
 ### Environment Variables
+Same pattern as Chapter 1 and Chapter 6: copy the template to a gitignored `.env`, edit it, and load it into your shell.
+
 ```bash
-export ONBOARDING_API_HOST=0.0.0.0
-export ONBOARDING_API_PORT=5000
-export ONBOARDING_API_DEBUG=False              # Set to True for development
-export ONBOARDING_AUDIT_LOG_PATH=./audit.log
-export ONBOARDING_DB_PATH=./onboarding.db
-export PERMISSIONS_DB_PATH=./permissions.json
-export KUBERNETES_NAMESPACE=platform-onboarding
-export KUBERNETES_CLUSTER=default
-export GITHUB_TOKEN=<your-github-token>       # For Git operations (or use: source load-secrets.sh)
+cp .env_example .env      # then edit .env (set ONBOARDING_API_DEBUG=True for development)
+set -a && source .env && set +a
 ```
+
+`.env_example` defines `ONBOARDING_API_HOST`, `ONBOARDING_API_PORT`, `ONBOARDING_API_DEBUG`, `ONBOARDING_AUDIT_LOG_PATH`, `ONBOARDING_DB_PATH`, `PERMISSIONS_DB_PATH`, `KUBERNETES_NAMESPACE`, `KUBERNETES_CLUSTER`, and `GITHUB_TOKEN` (for Git operations). If you use Bitwarden, run `source load-secrets.sh` instead of setting `GITHUB_TOKEN` in `.env`.
 
 ## Step-by-Step Instructions
-
-### Important: Filename Fix
-
-The audit logger file is named `audit-logger.py` (with a hyphen), but Python's `import` statement requires underscores. Several scripts (`onboarding-api.py`, `permission-delegation.py`, `project-bootstrapper.py`) import it as `from audit_logger import AuditLogger`. Before running any scripts, create a copy with the correct name:
-
-```bash
-cp audit-logger.py audit_logger.py
-```
-
-Without this, you'll see: `ModuleNotFoundError: No module named 'audit_logger'`
 
 ### Phase 1: API Setup and Team Provisioning
 
@@ -153,19 +142,19 @@ Expected output: YAML document defining `/teams` (POST, GET, DELETE) and `/teams
 Launch the Flask-based REST API. This server will handle all team provisioning requests:
 
 ```bash
-python3 onboarding-api.py
+python3 onboarding_api.py
 ```
 
 Expected output:
 ```
-2024-01-15 10:30:00 - __main__ - INFO - Starting Onboarding API on 0.0.0.0:5000
- * Running on http://0.0.0.0:5000
+2024-01-15 10:30:00 - __main__ - INFO - Starting Onboarding API on 0.0.0.0:5001
+ * Running on http://0.0.0.0:5001
 ```
 
 The API is now ready to accept requests. Verify it's running by checking the health in another terminal:
 
 ```bash
-curl http://localhost:5000/teams
+curl http://localhost:5001/teams
 ```
 
 Expected output: `{"teams": [], "total": 0, "offset": 0, "limit": 20}` (empty initially)
@@ -173,13 +162,15 @@ Expected output: `{"teams": [], "total": 0, "offset": 0, "limit": 20}` (empty in
 **Next step**: Proceed to Step 3.
 
 #### Step 3: Create Your First Team
-Create a team called "platform-team" with Alice as the lead. This operation triggers automatic namespace creation and RBAC setup:
+Create a team called "platform" with Alice as the lead. This operation triggers automatic namespace creation and RBAC setup:
+
+> **Note:** If the Gatekeeper policy `namespace-must-have-team` (Chapters 3/11) is active in your cluster, the namespace must carry `team` (letters only, 2-20 chars, so `platform` works but `platform-team` does not), `environment` (`dev`, `staging` or `prod`) and `cost-center` (4-6 digits) labels. The API sets `environment=dev` and `cost-center=1000` by default; override them with the optional `environment` and `cost_center` request fields.
 
 ```bash
-curl -X POST http://localhost:5000/teams \
+curl -X POST http://localhost:5001/teams \
   -H "Content-Type: application/json" \
   -d '{
-    "name": "platform-team",
+    "name": "platform",
     "display_name": "Platform Engineering Team",
     "lead": "alice@example.com",
     "description": "Core platform infrastructure",
@@ -195,13 +186,13 @@ curl -X POST http://localhost:5000/teams \
 Expected output:
 ```json
 {
-  "id": "platform-team",
-  "name": "platform-team",
+  "id": "platform",
+  "name": "platform",
   "display_name": "Platform Engineering Team",
   "lead": "alice@example.com",
   "created_at": "2024-01-15T10:35:00Z",
   "namespace": {
-    "name": "team-platform-team",
+    "name": "team-platform",
     "status": "active",
     "resource_quota": {...}
   },
@@ -213,9 +204,9 @@ Expected output:
 Verify the Kubernetes namespace was created:
 
 ```bash
-kubectl get ns team-platform-team
-kubectl get resourcequota -n team-platform-team
-kubectl get rolebindings -n team-platform-team
+kubectl get ns team-platform
+kubectl get resourcequota -n team-platform
+kubectl get rolebindings -n team-platform
 ```
 
 Expected output: Namespace exists with ResourceQuota and RoleBindings for team-lead, team-developer, and team-viewer groups.
@@ -226,7 +217,7 @@ Expected output: Namespace exists with ResourceQuota and RoleBindings for team-l
 Add developers to the team. Team leads can later manage additional members:
 
 ```bash
-curl -X POST http://localhost:5000/teams/platform-team/members \
+curl -X POST http://localhost:5001/teams/platform/members \
   -H "Content-Type: application/json" \
   -d '{
     "email": "bob@example.com",
@@ -234,7 +225,7 @@ curl -X POST http://localhost:5000/teams/platform-team/members \
     "role": "developer"
   }'
 
-curl -X POST http://localhost:5000/teams/platform-team/members \
+curl -X POST http://localhost:5001/teams/platform/members \
   -H "Content-Type: application/json" \
   -d '{
     "email": "carol@example.com",
@@ -248,7 +239,7 @@ Expected output: For each member, a 201 response with member details including j
 List team members to verify:
 
 ```bash
-curl http://localhost:5000/teams/platform-team/members
+curl http://localhost:5001/teams/platform/members
 ```
 
 Expected output:
@@ -268,13 +259,16 @@ Expected output:
 ### Phase 2: Permission Delegation & Self-Service
 
 #### Step 5: Set Up Permission Delegation
-Enable team leads to grant permissions to members without platform intervention:
+Enable team leads to grant permissions to members without platform intervention. This script keeps its own permission store (`permissions.json`), separate from the API, so first record the team lead there. Only leads can delegate (`delegate-permissions`) in Step 6:
 
 ```bash
-python3 permission-delegation.py grant-role platform-team bob@example.com developer
+python3 permission_delegation.py grant-role platform alice@example.com lead
+python3 permission_delegation.py grant-role platform bob@example.com developer
 ```
 
 Expected output: `Granted developer role to bob@example.com`
+
+> **Note:** `grant-role` does not check who is asking or whether the person is a member of the team in the API, so you can grant roles to anyone. Only `grant` and `revoke` verify that the acting user may delegate. Treat this as a demo simplification and add the check before using it beyond this chapter.
 
 This grants all permissions associated with the developer role:
 - create-projects
@@ -288,7 +282,7 @@ This grants all permissions associated with the developer role:
 View available roles and permissions:
 
 ```bash
-python3 permission-delegation.py list-roles
+python3 permission_delegation.py list-roles
 ```
 
 Expected output: Lists all permissions for lead, developer, and viewer roles.
@@ -296,12 +290,12 @@ Expected output: Lists all permissions for lead, developer, and viewer roles.
 Check a member's specific permissions:
 
 ```bash
-python3 permission-delegation.py list-member platform-team bob@example.com
+python3 permission_delegation.py list-member platform bob@example.com
 ```
 
 Expected output:
 ```
-Permissions for bob@example.com in platform-team:
+Permissions for bob@example.com in platform:
   - create-projects
   - manage-ci-cd
   - manage-deployments
@@ -317,7 +311,7 @@ Permissions for bob@example.com in platform-team:
 Check if a user has a specific permission:
 
 ```bash
-python3 permission-delegation.py check platform-team bob@example.com create-projects
+python3 permission_delegation.py check platform bob@example.com create-projects
 ```
 
 Expected output: `bob@example.com has create-projects: True`
@@ -325,7 +319,7 @@ Expected output: `bob@example.com has create-projects: True`
 Revoke a permission if needed:
 
 ```bash
-python3 permission-delegation.py revoke platform-team bob@example.com manage-ci-cd alice@example.com
+python3 permission_delegation.py revoke platform bob@example.com manage-ci-cd alice@example.com
 ```
 
 Expected output: `Revoked manage-ci-cd from bob@example.com`
@@ -338,21 +332,21 @@ Expected output: `Revoked manage-ci-cd from bob@example.com`
 Create a complete project with repository, CI/CD pipeline, Kubernetes manifests, and Backstage catalog entry:
 
 ```bash
-python3 project-bootstrapper.py bootstrap platform-team my-api python "RESTful API service"
+python3 project_bootstrapper.py bootstrap platform my-api python "RESTful API service"
 ```
 
 Expected output:
 ```
 Project my-api bootstrapped successfully!
-Repository: git@github.com:platform-team/my-api.git
+Repository: git@github.com:platform/my-api.git
 Files created: 11
 Project directory: ./my-api
 ```
 
 The bootstrapper writes all files to a `./my-api/` directory in your current working directory. This creates:
 - README.md with getting started instructions
-- Dockerfile with multi-stage build
-- .github/workflows/ci.yml for GitHub Actions CI/CD
+- Dockerfile (single-stage, non-root user)
+- .github/workflows/ci.yml for GitHub Actions CI/CD (calls `make test` and `make lint`; add a Makefile with those targets)
 - k8s/deployment.yaml, service.yaml, ingress.yaml, configmap.yaml
 - catalog-info.yaml for Backstage registration
 - Language-specific files (main.py, requirements.txt, etc.)
@@ -365,7 +359,7 @@ ls -R my-api/
 View available templates:
 
 ```bash
-python3 project-bootstrapper.py templates
+python3 project_bootstrapper.py templates
 ```
 
 Expected output:
@@ -390,10 +384,10 @@ my-api/
 │   ├── ingress.yaml     # TLS-enabled with cert-manager integration
 │   └── configmap.yaml   # Application configuration
 ├── .github/workflows/   # CI/CD pipeline
-│   └── ci.yml           # Build, test, and deploy on main branch
+│   └── ci.yml           # Build, test, lint on every push/PR; push and deploy on main (needs a Makefile with test/lint targets)
 ├── main.py              # Application entry point with health/ready/metrics endpoints
-├── requirements.txt     # Python dependencies (Flask, Gunicorn, etc.)
-├── Dockerfile           # Non-root user, health checks, multi-stage build
+├── requirements.txt     # Python dependencies (Flask, Gunicorn, etc.; the container runs `python main.py`, not Gunicorn)
+├── Dockerfile           # Single-stage, non-root user; its HEALTHCHECK uses curl, which python:3.11-slim lacks (install curl or rely on the Kubernetes probes)
 ├── README.md            # Getting started guide
 ├── .gitignore           # Language-specific ignores
 └── catalog-info.yaml    # Backstage component definition
@@ -403,7 +397,7 @@ Key features of bootstrapped projects:
 - **Health checks**: /health and /ready endpoints for Kubernetes probes
 - **Metrics**: Prometheus /metrics endpoint for monitoring
 - **Security**: Non-root containers, read-only filesystems, no privilege escalation
-- **CI/CD**: Automated build, test, and deploy on push to main branch
+- **CI/CD**: Automated build, test, and lint on every push/PR, and image push plus deploy on the main branch
 - **Documentation**: Comprehensive README with deployment instructions
 
 **Next step**: Proceed to Step 9.
@@ -414,7 +408,7 @@ Key features of bootstrapped projects:
 All onboarding actions are logged for compliance and troubleshooting:
 
 ```bash
-python3 audit-logger.py show
+python3 audit_logger.py show
 ```
 
 Expected output:
@@ -424,21 +418,21 @@ Showing N audit events (max 50):
 [2024-01-15T10:35:00Z] 20240115103500-1
   Action: team_created
   Actor: system
-  Resource: team/platform-team
+  Resource: team/platform
   Status: success
   Details: {"display_name": "Platform Engineering Team", "lead": "alice@example.com"}
 
 [2024-01-15T10:36:15Z] 20240115103615-2
   Action: member_added
   Actor: system
-  Resource: team_member/platform-team/bob@example.com
+  Resource: team_member/platform/bob@example.com
   Status: success
   Details: {"role": "developer"}
 
 [2024-01-15T10:37:30Z] 20240115103730-3
   Action: project_bootstrapped
   Actor: system
-  Resource: project/platform-team/my-api
+  Resource: project/platform/my-api
   Status: success
   Details: {"language": "python", "files_count": 15}
 ```
@@ -446,7 +440,7 @@ Showing N audit events (max 50):
 Get audit statistics:
 
 ```bash
-python3 audit-logger.py stats
+python3 audit_logger.py stats
 ```
 
 Expected output:
@@ -485,7 +479,7 @@ Statuses: {
 View failed operations for troubleshooting:
 
 ```bash
-python3 audit-logger.py failures
+python3 audit_logger.py failures
 ```
 
 Get history for a specific team:
@@ -493,7 +487,7 @@ Get history for a specific team:
 ```bash
 python3 -c "from audit_logger import AuditLogger, print_audit_events; \
 logger = AuditLogger(); \
-events = logger.get_team_history('platform-team'); \
+events = logger.get_team_history('platform'); \
 print_audit_events(events)"
 ```
 
@@ -511,22 +505,29 @@ Expected output:
 ============================================================
 Chapter 7: Onboarding API Tests
 ============================================================
-test_api_script_valid (__main__.TestOnboardingAPI) ... ok
-test_bootstrap_has_resource_quota (__main__.TestOnboardingAPI) ... ok
-test_bootstrap_yaml_exists (__main__.TestOnboardingAPI) ... ok
-test_openapi_has_team_endpoints (__main__.TestOnboardingAPI) ... ok
-test_openapi_spec_exists (__main__.TestOnboardingAPI) ... ok
-test_audit_logger_valid (__main__.TestSupportScripts) ... ok
-test_permission_delegation_valid (__main__.TestSupportScripts) ... ok
-test_project_bootstrapper_valid (__main__.TestSupportScripts) ... ok
+test_groups_provisioned_for_the_lead_when_configured (__main__.TestKeycloakOptIn...) ... ok
+test_keycloak_failure_does_not_fail_team_creation (__main__.TestKeycloakOptIn...) ... ok
+test_skipped_without_secret (__main__.TestKeycloakOptIn...) ... ok
+test_defaults (__main__.TestNamespaceLabels...) ... ok
+test_request_overrides (__main__.TestNamespaceLabels...) ... ok
+test_api_script_valid (__main__.TestOnboardingAPI...) ... ok
+test_bootstrap_has_resource_quota (__main__.TestOnboardingAPI...) ... ok
+test_bootstrap_yaml_exists (__main__.TestOnboardingAPI...) ... ok
+test_openapi_has_team_endpoints (__main__.TestOnboardingAPI...) ... ok
+test_openapi_spec_exists (__main__.TestOnboardingAPI...) ... ok
+test_lead_can_revoke_but_default_actor_and_developer_cannot (__main__.TestPermissionDelegationCLI...) ... ok
+test_audit_logger_valid (__main__.TestSupportScripts...) ... ok
+test_permission_delegation_valid (__main__.TestSupportScripts...) ... ok
+test_project_bootstrapper_valid (__main__.TestSupportScripts...) ... ok
+test_includes_members_and_projects_but_not_other_teams (__main__.TestTeamHistory...) ... ok
 
 ----------------------------------------------------------------------
-Ran 8 tests in 0.0XXs
+Ran 15 tests in 0.XXXs
 
 OK
 ```
 
-All tests should pass.
+All tests should pass. Besides checking that the scripts compile, the suite verifies the namespace labels required by Gatekeeper, the opt-in Keycloak group provisioning, the `grant`/`revoke` acting-user rules, and `get_team_history`. It uses temporary audit and permission files, so it does not touch your real `audit.log` or `permissions.json`. The two `TestNamespaceLabels` tests are skipped if Flask is not installed.
 
 **Congratulations!** You've successfully implemented a complete self-service onboarding platform.
 
@@ -536,22 +537,22 @@ All provisioning operations are designed to be safe to re-run:
 
 **Team Creation**: Creating a team that already exists returns success without modification:
 ```bash
-curl -X POST http://localhost:5000/teams \
+curl -X POST http://localhost:5001/teams \
   -H "Content-Type: application/json" \
-  -d '{"name": "platform-team", "display_name": "Platform Engineering Team", "lead": "alice@example.com"}'
+  -d '{"name": "platform", "display_name": "Platform Engineering Team", "lead": "alice@example.com"}'
 
 # Second call returns the same result without errors
 ```
 
 **Member Addition**: Adding a member that's already in a team returns success:
 ```bash
-python3 permission-delegation.py grant platform-team bob@example.com create-projects alice@example.com
+python3 permission_delegation.py grant platform bob@example.com create-projects alice@example.com
 # Safe to run multiple times - permission is only granted once
 ```
 
 **Project Bootstrapping**: Re-running updates existing configurations:
 ```bash
-python3 project-bootstrapper.py bootstrap platform-team my-api python "Updated description"
+python3 project_bootstrapper.py bootstrap platform my-api python "Updated description"
 # Updates catalog entry and manifests without corruption
 ```
 
@@ -606,7 +607,7 @@ Quotas are enforced at the Kubernetes ResourceQuota level. Teams can request quo
 ## Extending the Platform
 
 ### Adding New Project Templates
-Edit `project-bootstrapper.py` to add language support:
+Edit `project_bootstrapper.py` to add language support:
 
 ```python
 TEMPLATES = {
@@ -622,7 +623,7 @@ TEMPLATES = {
 Then update the `_generate_*` methods to create Rust-specific files.
 
 ### Custom Permission Scopes
-Extend `permission-delegation.py` with additional permissions:
+Extend `permission_delegation.py` with additional permissions:
 
 ```python
 ROLE_PERMISSIONS = {
@@ -635,7 +636,7 @@ ROLE_PERMISSIONS = {
 ```
 
 ### Integration with Backstage
-The `project-bootstrapper.py` creates Backstage catalog entries. Customize the template:
+The `project_bootstrapper.py` creates Backstage catalog entries. Customize the template:
 
 ```python
 def _generate_backstage_catalog(self, name: str, team: str, description: str) -> str:
@@ -645,19 +646,23 @@ def _generate_backstage_catalog(self, name: str, team: str, description: str) ->
 
 ### Integration with Keycloak
 
-`keycloak-groups.py` provides a complete Keycloak Admin REST API integration. It authenticates with a `client_credentials` grant, then idempotently creates and populates three groups per team:
+`keycloak_groups.py` calls the Keycloak Admin REST API. It authenticates with a `client_credentials` grant, then idempotently creates three groups per team (`{team}-admins`, `{team}-developers`, `{team}-viewers`), adds the team lead to `-admins` and the members to `-developers`. It is configured through environment variables, not command-line flags. Use the Keycloak Docker container, realm and client from Chapter 3:
 
 ```bash
-python3 keycloak-groups.py \
-  --keycloak-url https://keycloak.example.com \
-  --realm platform \
-  --client-id onboarding-api \
-  --client-secret $KEYCLOAK_CLIENT_SECRET \
-  --team platform-team \
-  --members alice@example.com,bob@example.com
+export KEYCLOAK_URL=http://localhost:8180
+export KEYCLOAK_REALM=platform-engineering
+export KEYCLOAK_ADMIN_CLIENT_ID=platform-client
+export KEYCLOAK_ADMIN_CLIENT_SECRET=<platform-client secret>   # Admin Console → Clients → platform-client → Credentials
+python3 keycloak_groups.py
 ```
 
-The script calls `provision_team_groups(team_id, member_emails)` which handles `get_admin_token()`, `create_group()` (no-op if group already exists), and `add_user_to_group()` for each member. Wire this into `onboarding-api.py` after the namespace provisioning step so Keycloak group membership mirrors Kubernetes RBAC automatically.
+(`.env_example` has the same variables.) Run as a script, it provisions the groups for team `platform` with `alice@example.com` as lead and `bob@example.com` as member. The `platform-client` service account needs the `manage-users` and `view-users` roles from the `realm-management` client (Clients → platform-client → Service accounts roles), and users that are not yet in the realm are skipped with a warning.
+
+From Python, call `provision_team_groups(team_name, members, lead_email)`; it returns the three group IDs. The script handles `get_admin_token()`, `create_group()` (no-op if the group already exists), and `add_user_to_group()` for each member.
+
+**Optional wiring into the API:** when `KEYCLOAK_ADMIN_CLIENT_SECRET` is set in the environment of `onboarding_api.py`, `POST /teams` also creates the team's three groups and adds the team lead to `{team}-admins`. Without that variable nothing changes, so this chapter still runs without Keycloak. A Keycloak error is logged as a warning and does not fail team creation. Deleting a team does not remove its groups.
+
+> **Note:** the groups are not yet mapped to the cluster: the RoleBindings the API creates use `team:<id>:<role>` group names, while `templates/team-rbac.yaml` expects `oidc:<team>-admins` / `-developers` / `-viewers`. Reconcile the names (and enable OIDC on the cluster) before relying on the groups for Kubernetes access.
 
 ### Webhook Notifications
 Add webhooks to notify Slack, email, or other systems:
@@ -689,22 +694,16 @@ Optimize for production:
 
 ## Troubleshooting
 
-### ModuleNotFoundError: No module named 'audit_logger'
-The file is named `audit-logger.py` (hyphen) but Python imports require underscores. Fix:
-```bash
-cp audit-logger.py audit_logger.py
-```
-
 ### API fails to start
 ```bash
 # Check Flask installation
 python3 -c "import flask; print(flask.__version__)"
 
-# Verify port 5000 is available
-lsof -i :5000
+# Verify port 5001 is available
+lsof -i :5001
 
 # Check detailed error logs
-ONBOARDING_API_DEBUG=True python3 onboarding-api.py
+ONBOARDING_API_DEBUG=True python3 onboarding_api.py
 ```
 
 ### Namespace creation fails
@@ -717,7 +716,7 @@ kubectl auth can-i create namespaces \
   --as=system:serviceaccount:platform-onboarding:onboarding-api
 
 # View API error logs
-curl -X POST http://localhost:5000/teams \
+curl -X POST http://localhost:5001/teams \
   -H "Content-Type: application/json" \
   -d '{"name": "test", "display_name": "Test", "lead": "test@example.com"}' -v
 ```
@@ -725,29 +724,29 @@ curl -X POST http://localhost:5000/teams \
 ### Permission delegation not working
 ```bash
 # Verify team exists
-curl http://localhost:5000/teams/platform-team
+curl http://localhost:5001/teams/platform
 
 # Check audit logs for errors
-python3 audit-logger.py failures
+python3 audit_logger.py failures
 
 # Verify member is in team
-curl http://localhost:5000/teams/platform-team/members
+curl http://localhost:5001/teams/platform/members
 
 # Debug permission check
 python3 -c "from permission_delegation import PermissionManager; \
 m = PermissionManager(); \
-print(m.has_permission('platform-team', 'bob@example.com', 'create-projects'))"
+print(m.has_permission('platform', 'bob@example.com', 'create-projects'))"
 ```
 
 ### Project bootstrap creates unexpected files
 ```bash
 # Verify template is correct
-python3 project-bootstrapper.py templates
+python3 project_bootstrapper.py templates
 
 # Check project info structure
 python3 -c "from project_bootstrapper import ProjectBootstrapper; \
 pb = ProjectBootstrapper(); \
-success, error, info = pb.bootstrap('platform-team', 'test-project', 'python'); \
+success, error, info = pb.bootstrap('platform', 'test-project', 'python'); \
 print(f'Files: {list(info[\"files\"].keys())}')"
 ```
 
@@ -770,7 +769,7 @@ The companion website at https://peh-packt.platformetrics.com/ provides addition
 When adding new features:
 
 1. **Update OpenAPI Spec**: Add new endpoints to `openapi-spec.yaml`
-2. **Implement API Endpoints**: Add Flask routes to `onboarding-api.py`
+2. **Implement API Endpoints**: Add Flask routes to `onboarding_api.py`
 3. **Add Audit Logging**: Log all operations using `audit_logger.log_event()`
 4. **Write Tests**: Add test cases to `test-onboarding.py`
 5. **Update This README**: Document new capabilities and expected outputs

@@ -29,6 +29,11 @@ try:
 except ImportError:
     ChatAnthropic = None
 
+try:
+    from langchain_ollama import ChatOllama
+except ImportError:
+    ChatOllama = None
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -76,14 +81,19 @@ class IncidentTriageAgent:
         Args:
             mock_mode: If True, use mock data instead of real systems
         """
-        self.mock_mode = mock_mode or not os.getenv("ANTHROPIC_API_KEY")
+        # Live mode needs Anthropic (API key) or a local Ollama model (OLLAMA_MODEL)
+        self.mock_mode = mock_mode or not (
+            os.getenv("ANTHROPIC_API_KEY") or os.getenv("OLLAMA_MODEL")
+        )
         self.llm = self._init_llm()
+        if isinstance(self.llm, MockLLM):
+            self.mock_mode = True
         self.incident_patterns = self._load_incident_patterns()
         self.runbook_index = self._load_runbooks()
         
     def _init_llm(self):
         """Initialize language model."""
-        if not self.mock_mode and ChatAnthropic:
+        if not self.mock_mode and os.getenv("ANTHROPIC_API_KEY") and ChatAnthropic:
             try:
                 return ChatAnthropic(
                     model="claude-sonnet-4-5-20250929",
@@ -93,6 +103,10 @@ class IncidentTriageAgent:
             except Exception as e:
                 logger.warning(f"Failed to initialize Claude: {e}. Using mock mode.")
                 return MockLLM()
+        # Local alternative: OLLAMA_MODEL (e.g. "mistral") with `ollama serve` running
+        ollama_model = os.getenv("OLLAMA_MODEL")
+        if not self.mock_mode and ollama_model and ChatOllama:
+            return ChatOllama(model=ollama_model, temperature=0.3)
         return MockLLM()
     
     def _load_incident_patterns(self) -> Dict:
@@ -532,11 +546,14 @@ if __name__ == "__main__":
 
     # Display mode banner
     print("=" * 70)
-    if not agent.mock_mode:
+    if not agent.mock_mode and ChatOllama and isinstance(agent.llm, ChatOllama):
+        print(f"  MODE: LIVE — Using local Ollama ({os.getenv('OLLAMA_MODEL')})")
+    elif not agent.mock_mode:
         print("  MODE: LIVE — Using Anthropic Claude (claude-sonnet-4-5-20250929)")
     else:
-        print("  MODE: MOCK — No LLM API key or langchain-anthropic not installed")
+        print("  MODE: MOCK — No LLM configured or LLM package not installed")
         print("  Tip:  export ANTHROPIC_API_KEY=sk-ant-... && pip3 install langchain-anthropic")
+        print("        or: export OLLAMA_MODEL=mistral && pip3 install langchain-ollama")
     print("=" * 70)
 
     incident = {

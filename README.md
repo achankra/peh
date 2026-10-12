@@ -15,10 +15,10 @@ Chapter 1 covers Python, Git, Bitwarden CLI, Pulumi basics, and pre-commit. The 
 | Tool | Version | Install | Used In |
 |------|---------|---------|---------|
 | Docker | 20.10+ | [docs.docker.com/get-docker](https://docs.docker.com/get-docker/) | Ch5, Ch8, Ch10, Ch13 |
-| Kind | 0.20+ | `brew install kind` / `go install sigs.k8s.io/kind` | Ch2 (creates your first cluster) |
-| kubectl | 1.26+ | `brew install kubectl` / [kubernetes.io/docs/tasks/tools](https://kubernetes.io/docs/tasks/tools/) | Ch2–Ch13 |
-| Helm | 3.0+ | `brew install helm` / [helm.sh/docs/intro/install](https://helm.sh/docs/intro/install/) | Ch2, Ch6, Ch8, Ch9, Ch10, Ch12, Ch13 |
-| Kustomize | 5.0+ | `brew install kustomize` | Ch2 |
+| Kind | 0.33.0 | `brew install kind` / `go install sigs.k8s.io/kind@v0.33.0` | Ch2 (creates your first cluster) |
+| kubectl | 1.37.1 | `brew install kubectl` / [kubernetes.io/docs/tasks/tools](https://kubernetes.io/docs/tasks/tools/) | Ch2–Ch13 |
+| Helm | 4.3.0 | `brew install helm` / [helm.sh/docs/intro/install](https://helm.sh/docs/intro/install/) | Ch2, Ch6, Ch8, Ch9, Ch10, Ch12, Ch13 |
+| Kustomize | 5.8.2 | `brew install kustomize` | Ch2 |
 
 Docker and kubectl are used in almost every chapter from Chapter 2 onwards. Install these first.
 
@@ -26,33 +26,33 @@ Docker and kubectl are used in almost every chapter from Chapter 2 onwards. Inst
 
 | Tool | Version | Install | Used In |
 |------|---------|---------|---------|
-| Flux CLI | 2.0+ | `brew install fluxcd/tap/flux` / `curl -s https://fluxcd.io/install.sh \| sudo bash` | Ch2 |
-| Istio (`istioctl`) | 1.10+ | [istio.io/latest/docs/setup/getting-started](https://istio.io/latest/docs/setup/getting-started/) | Ch2, Ch8 |
+| Flux CLI | 2.9.6 | `brew install fluxcd/tap/flux` / `curl -s https://fluxcd.io/install.sh \| sudo FLUX_VERSION=2.9.6 bash` | Ch2 |
+| Istio (`istioctl`) | 1.30.5 | `brew install istioctl` / `curl -L https://istio.io/downloadIstio \| ISTIO_VERSION=1.30.5 sh -` ([getting started](https://istio.io/latest/docs/setup/getting-started/)) | Ch2, Ch8 |
 
 ### Policy & Security
 
 | Tool | Version | Install | Used In |
 |------|---------|---------|---------|
-| OPA Gatekeeper | 3.14+ | Installed via Helm into the cluster | Ch3, Ch11 |
-| conftest | 0.41+ | `brew install conftest` | Ch11 |
-| OPA CLI | Latest | `brew install opa` | Ch11 |
-| cert-manager | Latest | Installed via Helm into the cluster | Ch3, Ch6 |
+| OPA Gatekeeper | chart 3.23.1 | Installed via Helm into the cluster | Ch3, Ch11 |
+| conftest | 0.71.1 | `brew install conftest` | Ch11 |
+| OPA CLI | 1.21.1 | `brew install opa` | Ch11 |
+| cert-manager | chart v1.21.1 | Installed via Helm into the cluster | Ch3, Ch6 |
 
 ### Observability
 
 | Tool | Version | Install | Used In |
 |------|---------|---------|---------|
-| Prometheus | 2.30+ | Installed via Helm (kube-prometheus-stack) | Ch4, Ch8, Ch11, Ch12, Ch13 |
-| Grafana | 8.0+ | Bundled with kube-prometheus-stack | Ch4, Ch11, Ch12 |
+| Prometheus | chart 92.1.1 | Installed via Helm (kube-prometheus-stack) | Ch4, Ch8, Ch11, Ch12, Ch13 |
+| Grafana | chart 92.1.1 | Bundled with kube-prometheus-stack | Ch4, Ch11, Ch12 |
 
 ### Infrastructure & Platform
 
 | Tool | Version | Install | Used In |
 |------|---------|---------|---------|
 | Pulumi | 3.0+ | `brew install pulumi/tap/pulumi` / `curl -fsSL https://get.pulumi.com \| sh` | Ch1, Ch2 |
-| Crossplane + CLI | 1.14+ | Installed via Helm; CLI: `curl -sL https://raw.githubusercontent.com/crossplane/crossplane/master/install.sh \| sh` | Ch9 |
-| Backstage | 1.20+ | `npx @backstage/create-app@latest` | Ch6, Ch10 |
-| Keycloak | 20+ | Docker image or Helm chart | Ch3, Ch6 |
+| Crossplane + CLI | 2.4.2 | Installed via Helm (chart 2.4.2); CLI: `brew install crossplane/tap/crossplane` / Linux `curl -sL -o crossplane https://releases.crossplane.io/stable/v2.4.2/bin/linux_amd64/crossplane` | Ch9 |
+| Backstage | image 1.55.2 (chart 2.10.2) | `npx @backstage/create-app@latest` | Ch6, Ch10 |
+| Keycloak | chart 25.2.0 | Docker image or Helm chart | Ch3, Ch6 |
 
 ### Node.js Ecosystem
 
@@ -67,12 +67,12 @@ Docker and kubectl are used in almost every chapter from Chapter 2 onwards. Inst
 
 | Tool | Version | Install | Used In |
 |------|---------|---------|---------|
-| Sloth | Latest | `go install github.com/slok/sloth/cmd/sloth@latest` | Ch13 |
-| Velero | 1.12+ | `brew install velero` / [velero.io/docs/install-overview](https://velero.io/docs/main/basic-install/) | Ch13 |
-| Chaos Mesh | Latest | Installed via Helm | Ch13 |
-| OpenCost | Latest | Installed via `install-opencost.sh` (Ch12) | Ch12 |
-| VPA | Latest | `git clone https://github.com/kubernetes/autoscaler.git && kubectl apply -f autoscaler/vertical-pod-autoscaler/deploy/` | Ch12 |
-| Metrics Server | Latest | `kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml` | Ch12 |
+| Sloth | 0.11.0 | `go install github.com/slok/sloth/cmd/sloth@v0.11.0` | Ch13 |
+| Velero | 1.18.2 (chart 12.2.1) | `brew install velero` / [velero.io/docs/install-overview](https://velero.io/docs/main/basic-install/) | Ch13 |
+| Chaos Mesh | chart 2.8.4 | Installed via Helm | Ch13 |
+| OpenCost | chart 2.5.32 | Installed via `install-opencost.sh` (Ch12) | Ch12 |
+| VPA | 1.8.0 | `kubectl apply -k "https://github.com/kubernetes/autoscaler//vertical-pod-autoscaler/deploy?ref=vertical-pod-autoscaler/v1.8.0"` (plus the TLS secret step in Ch12) | Ch12 |
+| Metrics Server | 0.9.0 | `kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.0/components.yaml` | Ch12 |
 
 > **Kind cluster note:** Metrics Server requires a TLS patch on Kind clusters:
 > ```bash
@@ -156,6 +156,8 @@ Chapter 3 deploys Gatekeeper as part of cluster security. Chapter 11 goes much d
 
 The monitoring stack from Chapter 4 is assumed to be running in later chapters. If you're jumping straight to Chapter 12 or 13, make sure Prometheus is deployed in your cluster first.
 
+Chapter 2's `scripts/port-forward.sh` starts background port-forwards for Grafana, Prometheus, and Alertmanager UIs together and tracks their PIDs for a clean shutdown — see [Ch02/README.md](Ch02/README.md#local-ui-access-grafana-prometheus-alertmanager).
+
 ### Keycloak — Identity Provider
 
 **Introduced:** Chapter 3 (securing platform access)
@@ -204,10 +206,12 @@ npm install -g @bitwarden/cli
 
 # 7. Resilience tools (Ch13)
 brew install velero
-go install github.com/slok/sloth/cmd/sloth@latest
+go install github.com/slok/sloth/cmd/sloth@v0.11.0
 ```
 
 Everything else (Prometheus, Grafana, Gatekeeper, cert-manager, Crossplane, Chaos Mesh, OpenCost, Backstage, Keycloak) is deployed **into the cluster** via Helm or kubectl as part of the chapter walkthroughs.
+
+> **Versions:** `brew install` always installs the current release. The tables above list the exact versions the chapters were tested with; Appendix A (`INSTALLATION.md`) has the pinned install command for each one (for example `brew install kubectl` gives the latest, while the Linux download is pinned to 1.37.1).
 
 ---
 
@@ -235,17 +239,17 @@ docker ps               # Should return an empty table (no error)
 kind get clusters
 ```
 
-**If your cluster is listed** (e.g., `peh`), the container may just be stopped. Try restarting it:
+**If your cluster is listed** (e.g., `platform-dev`), the container may just be stopped. Try restarting it:
 
 ```bash
-docker start peh-control-plane    # Replace "peh" with your cluster name
+docker start platform-dev-control-plane    # Replace "platform-dev" with your cluster name
 kubectl cluster-info               # Verify the API server is reachable
 ```
 
 **If no clusters are listed**, you need to recreate:
 
 ```bash
-kind create cluster --name peh --config Ch02/kind-config.yaml
+kind create cluster --name platform-dev --config Ch02/kind-config.yaml
 ```
 
 > **Note:** If you don't have a `kind-config.yaml`, create one with ingress port mappings:
@@ -277,27 +281,27 @@ After recreating a cluster, all Helm releases and deployed workloads are gone. R
 # Monitoring stack (Ch4+) — needed by Ch4, Ch8, Ch11, Ch12, Ch13
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
-helm install monitoring prometheus-community/kube-prometheus-stack \
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --version 92.1.1 \
   --namespace monitoring --create-namespace
 
 # Gatekeeper (Ch3, Ch11)
 helm repo add gatekeeper https://open-policy-agent.github.io/gatekeeper/charts
-helm install gatekeeper gatekeeper/gatekeeper \
+helm install gatekeeper gatekeeper/gatekeeper --version 3.23.1 \
   --namespace gatekeeper-system --create-namespace
 
 # cert-manager (Ch3, Ch6)
 helm repo add jetstack https://charts.jetstack.io
-helm install cert-manager jetstack/cert-manager \
-  --namespace cert-manager --create-namespace --set installCRDs=true
+helm install cert-manager jetstack/cert-manager --version v1.21.1 \
+  --namespace cert-manager --create-namespace --set crds.enabled=true
 
 # Crossplane (Ch9)
 helm repo add crossplane-stable https://charts.crossplane.io/stable
-helm install crossplane crossplane-stable/crossplane \
+helm install crossplane crossplane-stable/crossplane --version 2.4.2 \
   --namespace crossplane-system --create-namespace
 
 # Keycloak (Ch3, Ch6) — use port 8180 to avoid Kind port conflict
 helm repo add bitnami https://charts.bitnami.com/bitnami
-helm install keycloak bitnami/keycloak \
+helm install keycloak bitnami/keycloak --version 25.2.0 \
   --namespace keycloak --create-namespace \
   --set auth.adminUser=admin --set auth.adminPassword=admin
 ```
@@ -311,14 +315,17 @@ kubectl get pods -A              # Check all pods are Running
 kubectl get nodes                # Should show one Ready node
 ```
 
-Then re-run any `kubectl port-forward` commands from your chapter's README. For example, for Chapter 4:
+Then re-run any `kubectl port-forward` commands from your chapter's README.
+Chapter 2 ships `Ch02/scripts/port-forward.sh` to manage these in the
+background instead of running them by hand. Its default service names match the
+monitoring stack whether Flux (Chapter 2) or the commands above installed it,
+because both use the Helm release name `kube-prometheus-stack`:
 
 ```bash
-kubectl port-forward -n monitoring svc/prometheus-operated 9090:9090 &
-kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80 &
+Ch02/scripts/port-forward.sh start
 
 # Retrieve the Grafana admin password
-kubectl get secret monitoring-grafana -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d; echo
+kubectl get secret kube-prometheus-stack-grafana -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d; echo
 ```
 
 Open [http://localhost:3000](http://localhost:3000) and log in with username `admin` and the password from the command above.

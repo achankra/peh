@@ -57,5 +57,5 @@ bw_export "GITHUB_ORG"   "peh-github" "org"
 
 echo ""
 echo "Chapter 7 secrets loaded. You can now run:"
-echo "  python3 onboarding-api.py"
+echo "  python3 onboarding_api.py"
 echo "  node services/teamService.js"

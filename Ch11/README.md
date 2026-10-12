@@ -69,7 +69,7 @@ This directory contains production-ready examples tied to specific chapter secti
 
 | File | Chapter Section | Purpose |
 |------|-----------------|---------|
-| `prometheus-gatekeeper-config.yaml` | 11.4, Listing 11.9 | Prometheus ConfigMap configuring scrape targets for Gatekeeper audit metrics (gatekeeper_violations_total, gatekeeper_constraint_status) |
+| `prometheus-gatekeeper-config.yaml` | 11.4, Listing 11.9 | Prometheus ConfigMap configuring a scrape target for Gatekeeper's native metrics (`gatekeeper_violations`, `gatekeeper_constraints`) for a standalone Prometheus. Prometheus Operator ignores it and uses the ServiceMonitor below |
 | `gatekeeper-metrics-servicemonitor.yaml` | 11.4 | Prometheus Operator ServiceMonitor + Service for automatic metric discovery and scraping from Gatekeeper |
 | `grafana-compliance-dashboard.json` | 11.4, Listing 11.11 | Grafana dashboard JSON showing Total Violations, Violations by Constraint, Violations by Namespace, and Compliance Rate |
 | `compliance-dashboard.py` | 11.4, Listing 11.12 | Python script querying Kubernetes Gatekeeper events and generating compliance reports (violations by policy, namespace, severity) |
@@ -86,7 +86,7 @@ This directory contains production-ready examples tied to specific chapter secti
 
 | File | Chapter Section | Purpose |
 |------|-----------------|---------|
-| `test-policies.py` | 11.3, 11.4 | Python unittest suite simulating policy violations and testing both offline (conftest) and live (Gatekeeper) enforcement |
+| `test-policies.py` | 11.3, 11.4 | Python unittest suite simulating policy violations and testing both offline (conftest) and live (`--live`, Gatekeeper admission via `kubectl --dry-run=server`) enforcement |
 
 ## Orphan Files Flagged
 
@@ -98,7 +98,7 @@ This directory contains production-ready examples tied to specific chapter secti
 
 > If you are jumping into this chapter without completing earlier chapters, use these commands to set up the infrastructure dependencies. If you already have them running, skip this section.
 
-> **Note:** OPA Gatekeeper can be installed via Helm (shown above) or via raw manifests. Either method works.
+> **Note:** If you completed Chapter 2, Gatekeeper is already installed by Flux (`HelmRelease/gatekeeper` in `flux-system`, pods in `gatekeeper-system`). Skip the Gatekeeper install below and go straight to Phase 1.2 to verify it. Otherwise, OPA Gatekeeper can be installed via Helm (shown below) or via raw manifests. Either method works.
 
 ```bash
 # 1. Start Docker Desktop (macOS: open from Applications or Spotlight)
@@ -113,7 +113,7 @@ kubectl get nodes                       # Verify node(s) are Ready
 # Install OPA Gatekeeper
 helm repo add gatekeeper https://open-policy-agent.github.io/gatekeeper/charts
 helm repo update
-helm install gatekeeper gatekeeper/gatekeeper --namespace gatekeeper-system --create-namespace
+helm install gatekeeper gatekeeper/gatekeeper --version 3.23.1 --namespace gatekeeper-system --create-namespace
 
 ```
 
@@ -123,12 +123,12 @@ helm install gatekeeper gatekeeper/gatekeeper --namespace gatekeeper-system --cr
 - ~200MB memory allocation for Gatekeeper components (audit, controller-manager, constraint processing)
 
 ### OPA Gatekeeper Installation
-- **OPA Gatekeeper** v3.14.0+ (or use Helm chart: `open-policy-agent/gatekeeper`)
+- **OPA Gatekeeper** v3.23.1 (or use Helm chart: `open-policy-agent/gatekeeper`)
 - ValidatingWebhookConfiguration and MutatingWebhookConfiguration supported (standard in K8s v1.18+)
 - Certificate management for webhook TLS (included in gatekeeper-install.yaml)
 
 ### Shift-Left Testing
-- **conftest** v0.41.0+ (specified in `.pre-commit-config.yaml`; used in CI/CD workflows)
+- **conftest** v0.71.1 (specified in `.pre-commit-config.yaml`; used in CI/CD workflows)
   - Installation: `brew install conftest` (macOS) or download from https://github.com/open-policy-agent/conftest/releases
 - **OPA CLI** (opa test, opa parse) for policy unit testing (installed with conftest or separately)
 - **pre-commit** framework (for shift-left validation hooks in `.pre-commit-config.yaml`)
@@ -139,8 +139,8 @@ helm install gatekeeper gatekeeper/gatekeeper --namespace gatekeeper-system --cr
   ```
 
 ### Compliance Monitoring
-- **Prometheus** v2.30+ (optional but recommended for compliance dashboard)
-- **Grafana** v8.0+ (optional for compliance dashboard visualization)
+- **Prometheus** (kube-prometheus-stack chart 92.1.1; optional but recommended for compliance dashboard)
+- **Grafana** (bundled with kube-prometheus-stack chart 92.1.1; optional for compliance dashboard visualization)
 - **Prometheus Operator** (if using gatekeeper-metrics-servicemonitor.yaml)
 
 ### For CI/CD Integration
@@ -152,6 +152,13 @@ helm install gatekeeper gatekeeper/gatekeeper --namespace gatekeeper-system --cr
 ### Phase 1: Deploy OPA Gatekeeper
 
 #### 1.1 Choose Installation Method
+
+> **Already installed in Chapter 2?** Skip this step. Flux manages Gatekeeper there; installing it again with `helm install` or `kubectl apply` would conflict with the Flux-managed release. Confirm it is healthy and continue with 1.2:
+>
+> ```bash
+> kubectl get helmrelease gatekeeper -n flux-system
+> # Expected: READY True
+> ```
 
 **Option A: kubectl (Manual)**
 ```bash
@@ -173,7 +180,7 @@ helm repo add gatekeeper https://open-policy-agent.github.io/gatekeeper/charts
 helm repo update
 
 # Install Gatekeeper
-helm install gatekeeper gatekeeper/gatekeeper -n gatekeeper-system --create-namespace
+helm install gatekeeper gatekeeper/gatekeeper --version 3.23.1 -n gatekeeper-system --create-namespace
 
 # Verify installation
 helm list -n gatekeeper-system
@@ -247,9 +254,15 @@ require-resources                    dryrun               29
 restrict-image-registries            dryrun
 ```
 
+> **Coming from Chapters 2 and 3?** None of the templates above are installed yet, so apply everything as written. Your cluster already has other Gatekeeper constraints from those chapters (Ch02: `require-limits`, `allowed-registries`; Ch03: `namespace-must-have-team`, `require-resource-limits`), so `kubectl get constraints -A` will list them alongside the Ch11 ones, and the Ch03 ones are in `deny` mode rather than `dryrun`. Some names look alike but are different kinds: `K8sRequiredLabels` (Ch03) vs `K8sRequireLabels` (Ch11), and `K8sRequiredLimits` (Ch02) vs `K8sRequireResourceLimits` (Ch11).
+
+> **Registry allowlists differ:** Ch11's `restrict-image-registries` is stricter than Ch02's `allowed-registries`. Ch11 allows `gcr.io/`, `registry.example.com/`, `quay.io/my-org/`, `docker.io/library/`, `k8s.gcr.io/` and `xpkg.crossplane.io/`, so images from `ghcr.io/`, `registry.k8s.io/` and `registry.istio.io/`, which Ch02 allows, are reported as violations. On a cluster with the earlier chapters' workloads (demo app, Istio) expect dozens of findings, for example `Image 'ghcr.io/stefanprodan/podinfo:6.15.0' is from unauthorized registry`. This is intentional for the audit demo and harmless in `dryrun`. Add your registries to `constraints/restrict-image-registries.yaml` before switching it to `deny`.
+
 > **Note:** All constraints use `dryrun` (audit mode) so you can monitor violations without blocking deployments. This is critical — using `deny` enforcement would block Helm installs in later chapters (e.g., OpenCost in Ch12) because third-party charts typically don't include your custom labels. Violation counts appear after Gatekeeper's next audit cycle (typically 60 seconds).
 
 #### 2.2 Check Initial Audit Results
+
+> **Name clash with Chapter 3:** If you did Ch03, a constraint named `require-resource-limits` already exists there (kind `ResourceLimits`) next to the Ch11 one (kind `K8sRequireResourceLimits`). A bare `kubectl describe constraint require-resource-limits` can return the Ch03 one, so name the kind to see the Ch11 constraint, for example `kubectl describe k8srequireresourcelimits require-resource-limits`. The `kubectl get constraint require-resource-limits` commands below need the same change.
 
 ```bash
 # View constraint status and violation counts
@@ -301,7 +314,7 @@ conftest test -p conftest-tests/policy.rego conftest-tests/test-manifests.yaml
 **Expected:** A mix of passes, warnings, and failures. The test manifests contain both compliant and intentionally non-compliant resources:
 
 ```
-56 tests, 36 passed, 3 warnings, 17 failures, 0 exceptions
+56 tests, 36 passed, 3 warnings, 11 failures, 0 exceptions
 ```
 
 Failures include missing labels (`team`, `owner`, `cost-center`), missing resource limits, privileged containers, unauthorized registries, and running as root. These are intentional — the test manifests demonstrate what each policy catches. The 36 passing tests confirm that compliant resources are correctly allowed through.
@@ -462,12 +475,21 @@ The test suite validates that compliant manifests (with labels, resource limits,
 #### 4.2 Test Against Live Cluster
 
 ```bash
-# Run integration tests against your actual Gatekeeper deployment
+# Run the offline tests plus the live Gatekeeper tests against your cluster
 python3 test-policies.py --live
-
-# This will attempt to create non-compliant resources and verify they're rejected
-# Expected: Resources without proper resource limits will be rejected by Gatekeeper
 ```
+
+Requires the `K8sRequiredResources` ConstraintTemplate from step 2.1 (`constraint-template.yaml`). The live tests do not change your Chapter 11 constraints. They create a scratch namespace (`peh-policy-test`) and a temporary deny-mode constraint (`peh-live-test`) scoped to that namespace, submit two pods with `kubectl apply --dry-run=server`, and delete both afterwards (nothing is ever created from the pods).
+
+**Expected:** The 6 offline tests plus 2 live tests pass:
+
+```
+test_pod_with_resources_admitted ... ok
+test_pod_without_resources_denied ... ok
+Ran 8 tests in ~2s — OK
+```
+
+The pod without requests/limits is rejected with `[peh-live-test] Container app is missing resource limits`, and the pod with them is admitted. Gatekeeper takes a few seconds to start enforcing the new constraint, so the first run pauses briefly in setup.
 
 #### 4.3 Manually Test Admission Webhook
 
@@ -479,7 +501,7 @@ kubectl patch k8srequiredresources require-resources \
   --type merge -p '{"spec":{"enforcementAction":"deny"}}'
 
 # Non-compliant: no resource limits → DENIED by Gatekeeper
-kubectl run test-noncompliant --image=nginx --dry-run=server
+kubectl run test-noncompliant --image=docker.io/library/nginx --dry-run=server
 ```
 
 **Expected:** Gatekeeper denies the request because the pod has no resource limits:
@@ -490,10 +512,13 @@ Error from server (Forbidden): admission webhook "validation.gatekeeper.sh" deni
 [require-resources] Container test-noncompliant is missing resource requests
 ```
 
+> If you completed Chapter 2, its `require-limits` constraint also denies this pod, so you will additionally see `[require-limits] Container test-noncompliant is missing required cpu limit` (and `memory`). The `[require-resources]` lines confirm the Chapter 11 constraint is enforcing. The image is fully qualified because Chapter 2's `allowed-registries` rejects bare image names like `nginx`.
+
 ```bash
 # Compliant: with resource limits → ACCEPTED by Gatekeeper
-kubectl run test-compliant --image=nginx --dry-run=server \
-  --overrides='{"spec":{"containers":[{"name":"nginx","image":"nginx","resources":{"limits":{"cpu":"100m","memory":"128Mi"},"requests":{"cpu":"50m","memory":"64Mi"}}}]}}'
+# The override must reuse the container name (test-compliant); a different name adds a second container
+kubectl run test-compliant --image=docker.io/library/nginx --dry-run=server \
+  --overrides='{"spec":{"containers":[{"name":"test-compliant","image":"docker.io/library/nginx","resources":{"limits":{"cpu":"100m","memory":"128Mi"},"requests":{"cpu":"50m","memory":"64Mi"}}}]}}'
 ```
 
 **Expected:** `pod/test-compliant created (server dry run)` — Gatekeeper allows the pod because it has proper resource limits. The `--dry-run=server` flag validates against the admission webhook without actually creating the pod.
@@ -509,8 +534,8 @@ kubectl patch k8srequiredresources require-resources \
 #### 5.1 Deploy Prometheus Scrape Configuration
 
 ```bash
-# Create monitoring namespace (if not exists)
-kubectl create namespace monitoring
+# Create monitoring namespace (safe to re-run if it already exists)
+kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
 
 # Deploy Prometheus ConfigMap for Gatekeeper metrics
 kubectl apply -f prometheus-gatekeeper-config.yaml
@@ -518,6 +543,8 @@ kubectl apply -f prometheus-gatekeeper-config.yaml
 # Verify ConfigMap
 kubectl get configmap -n monitoring prometheus-gatekeeper -o yaml
 ```
+
+> **Already running kube-prometheus-stack (Chapter 4)?** The `monitoring` namespace and Prometheus Operator already exist. Prometheus Operator does not read this ConfigMap, so applying it changes nothing on its own. The scraping that actually works for you is the ServiceMonitor in 5.2. Apply this ConfigMap only if you run a standalone Prometheus and mount it there.
 
 #### 5.2 Deploy Prometheus Operator ServiceMonitor (Optional)
 
@@ -530,7 +557,14 @@ kubectl get servicemonitor -n gatekeeper-system
 
 # Verify Service is created
 kubectl get svc -n gatekeeper-system | grep gatekeeper
+
+# Verify Prometheus picked up the targets (about a minute after applying)
+kubectl port-forward -n monitoring svc/kube-prometheus-stack-prometheus 9090:9090 &
+curl -s localhost:9090/api/v1/targets | jq -r '.data.activeTargets[] | select(.scrapePool | test("gatekeeper")) | "\(.labels.pod) \(.health)"'
+kill %1
 ```
+
+**Expected:** three targets (the audit pod and two controller-manager pods) with health `up`. Gatekeeper's native metrics are then queryable, for example `gatekeeper_violations` (a gauge with an `enforcement_action` label) and `gatekeeper_constraints`. Note that Gatekeeper does not expose `gatekeeper_violations_total`; that name belongs to the custom exporter in 5.5.
 
 #### 5.3 Generate Compliance Reports
 
@@ -580,6 +614,17 @@ curl -X POST http://localhost:3000/api/dashboards/db \
 #   - Compliance Rate (gauge)
 ```
 
+Two panels use Gatekeeper's native metrics and work once the 5.2 ServiceMonitor is scraped:
+
+| Panel | Query | Source |
+|-------|-------|--------|
+| Total Violations | `sum(gatekeeper_violations)` | native |
+| Compliance Rate | share of active constraints with `enforcement_action='deny'` (`gatekeeper_constraints`) | native |
+| Violations by Constraint | `topk(5, sum by (policy) (gatekeeper_violations_by_policy))` | exporter (5.5) |
+| Violations by Namespace | `topk(10, gatekeeper_violations_by_namespace)` | exporter (5.5) |
+
+The two exporter panels stay empty until the exporter from 5.5 runs as an in-cluster Deployment that Prometheus scrapes; running it on your laptop does not feed them. "Compliance Rate" is the share of constraints in `deny` mode, so it reads low (for example 40%) while you are still in audit mode.
+
 #### 5.5 Deploy the Custom Gatekeeper Prometheus Exporter (Optional)
 
 For richer metrics beyond what Gatekeeper exposes natively, deploy the custom exporter:
@@ -601,6 +646,8 @@ curl http://localhost:8000/metrics | grep gatekeeper_
 #   gatekeeper_violations_by_namespace
 #   gatekeeper_constraint_count
 ```
+
+Gatekeeper stores at most 20 violations per constraint (`--constraint-violations-limit=20`), so the exporter's per-policy and per-namespace counts are capped and add up to less than the native `gatekeeper_violations` total (for example 89 vs 321). Use the native metric for totals and the exporter for the breakdowns.
 
 For production, deploy as a Kubernetes Deployment and add a ServiceMonitor pointing to its `/metrics` endpoint.
 
@@ -736,10 +783,10 @@ opa test policies/require-tests-passed_test.rego -v
 
 ### Gatekeeper Pods Not Starting
 
-> **Important**: If Gatekeeper was installed via Flux (Chapter 2), pods may be in `flux-system` instead of `gatekeeper-system`. Check both namespaces: `kubectl get pods -A | grep gatekeeper`
+> **Important**: If Gatekeeper was installed via Flux (Chapter 2), the `HelmRelease` lives in `flux-system` but the pods still run in `gatekeeper-system`. If they are not Ready, check the release first: `kubectl describe helmrelease gatekeeper -n flux-system`
 
 ```bash
-# Check pod events and logs (adjust namespace if using flux-system)
+# Check pod events and logs
 kubectl describe pod -n gatekeeper-system \
   -l control-plane=controller-manager
 
@@ -795,7 +842,7 @@ conftest test -p conftest-tests/policy.rego /tmp/deployment.yaml -d
 # Workaround: Delete the stale webhook (Gatekeeper will recreate it)
 kubectl delete validatingwebhookconfiguration gatekeeper-validating-webhook-configuration
 
-# Check webhook logs for slowness (adjust namespace if pods are in flux-system)
+# Check webhook logs for slowness
 kubectl logs -n gatekeeper-system deployment/gatekeeper-audit | grep -i latency
 
 # Solution options:

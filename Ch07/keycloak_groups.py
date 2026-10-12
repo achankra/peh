@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-keycloak-groups.py
+keycloak_groups.py
 Chapter 7 — Keycloak Group Management via Admin API
 
 When the onboarding API provisions a new team, it also creates the
 corresponding Keycloak groups so that SSO-authenticated users are
 automatically placed in the right RBAC binding on first login.
 
-This module is called by onboarding-api.py after Kubernetes namespace
-provisioning. It creates three groups per team:
+This module is called by onboarding_api.py after Kubernetes namespace
+provisioning when KEYCLOAK_ADMIN_CLIENT_SECRET is set (opt-in). It creates
+three groups per team:
   {teamName}-admins
   {teamName}-developers
   {teamName}-viewers
@@ -17,11 +18,11 @@ These group names match the OIDC subject names in team-rbac.yaml:
   oidc:{teamName}-admins / oidc:{teamName}-developers / etc.
 
 Usage (standalone):
-  export KEYCLOAK_URL=https://keycloak.platform.example.com
-  export KEYCLOAK_REALM=platform
-  export KEYCLOAK_ADMIN_CLIENT_ID=admin-cli
+  export KEYCLOAK_URL=http://localhost:8180
+  export KEYCLOAK_REALM=platform-engineering
+  export KEYCLOAK_ADMIN_CLIENT_ID=platform-client
   export KEYCLOAK_ADMIN_CLIENT_SECRET=<secret>
-  python3 keycloak-groups.py
+  python3 keycloak_groups.py
 
 Full companion code: https://github.com/peh-book/ch7
 """
@@ -33,9 +34,9 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-KEYCLOAK_URL          = os.getenv('KEYCLOAK_URL', 'http://keycloak.platform.svc.cluster.local')
-KEYCLOAK_REALM        = os.getenv('KEYCLOAK_REALM', 'platform')
-ADMIN_CLIENT_ID       = os.getenv('KEYCLOAK_ADMIN_CLIENT_ID', 'admin-cli')
+KEYCLOAK_URL          = os.getenv('KEYCLOAK_URL', 'http://localhost:8180')
+KEYCLOAK_REALM        = os.getenv('KEYCLOAK_REALM', 'platform-engineering')
+ADMIN_CLIENT_ID       = os.getenv('KEYCLOAK_ADMIN_CLIENT_ID', 'platform-client')
 ADMIN_CLIENT_SECRET   = os.getenv('KEYCLOAK_ADMIN_CLIENT_SECRET', '')
 
 
@@ -169,7 +170,7 @@ if __name__ == '__main__':
 
     # Standalone smoke test
     result = provision_team_groups(
-        team_name='team-beta',
+        team_name='platform',
         members=['alice@example.com', 'bob@example.com'],
         lead_email='alice@example.com'
     )

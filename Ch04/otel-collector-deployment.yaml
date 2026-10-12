@@ -10,6 +10,10 @@ metadata:
   name: observability
   labels:
     name: observability
+    # Required by the Gatekeeper namespace-must-have-team constraint
+    team: platform
+    environment: dev
+    cost-center: "10001"
 
 ---
 # ConfigMap containing OTEL Collector configuration
@@ -38,6 +42,22 @@ data:
                 - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
                   action: keep
                   regex: "true"
+                # Don't scrape the collectors themselves: their :8889 output
+                # would be re-ingested and re-exported (duplicate label errors)
+                - source_labels: [__meta_kubernetes_namespace]
+                  action: drop
+                  regex: observability
+                # Scrape only the port named in the prometheus.io/port annotation
+                # (otherwise every container port of the pod is tried)
+                - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                  action: replace
+                  regex: ([^:]+)(?::\d+)?;(\d+)
+                  replacement: $$1:$$2
+                  target_label: __address__
+                - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                  action: replace
+                  regex: (.+)
+                  target_label: __metrics_path__
 
     processors:
       batch:
@@ -197,7 +217,8 @@ spec:
       containers:
         - name: otel-collector
           # Use otel/opentelemetry-collector-k8s image for Kubernetes support
-          image: otel/opentelemetry-collector-contrib:0.98.0
+          # Fully qualified (docker.io/) so it matches the Gatekeeper allowed-registries constraint
+          image: docker.io/otel/opentelemetry-collector-contrib:0.98.0
           imagePullPolicy: IfNotPresent
 
           # Ports exposed by collector

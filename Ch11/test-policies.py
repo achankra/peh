@@ -6,12 +6,13 @@ Tests that validate OPA Gatekeeper policies by simulating compliant
 and non-compliant Kubernetes resources.
 
 Usage:
-    python test-policies.py [--live]     # --live tests against real cluster
-    python test-policies.py              # default: offline validation
+    python test-policies.py              # offline validation
+    python test-policies.py --live       # also test against a real cluster
 
 Prerequisites:
-    - conftest CLI installed (for offline tests)
-    - kubectl + Gatekeeper installed (for --live tests)
+    - conftest CLI installed (for the conftest integration tests)
+    - kubectl + Gatekeeper + the K8sRequiredResources ConstraintTemplate
+      from constraint-template.yaml (for --live tests, see README 2.1)
 """
 
 import json
@@ -19,7 +20,12 @@ import subprocess
 import sys
 import tempfile
 import os
+import time
 import unittest
+from typing import Optional
+
+# --live is handled here because unittest.main() would reject it.
+LIVE = "--live" in sys.argv
 
 
 # --- Sample Kubernetes manifests for testing ---
@@ -212,8 +218,132 @@ class TestConftestIntegration(unittest.TestCase):
             self.assertEqual(result.returncode, 0, f"Unexpected failures: {result.stdout}")
 
 
+# --- Live cluster tests (--live) ---
+
+TEST_NAMESPACE = "peh-policy-test"
+TEST_CONSTRAINT = "peh-live-test"
+
+# Labelled so it passes the Chapter 3 namespace-label constraint, if present.
+TEST_NAMESPACE_MANIFEST = f"""
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {TEST_NAMESPACE}
+  labels:
+    team: platform
+    environment: dev
+    cost-center: "1234"
+"""
+
+# Same template as constraints/require-resources.yaml, but in deny mode and
+# scoped to the scratch namespace so the real constraints are never touched.
+TEST_CONSTRAINT_MANIFEST = f"""
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredResources
+metadata:
+  name: {TEST_CONSTRAINT}
+spec:
+  enforcementAction: deny
+  match:
+    namespaces: ["{TEST_NAMESPACE}"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+"""
+
+# registry.k8s.io is on the Chapter 2 registry allowlist, so a denial can only
+# come from the missing resources.
+POD_NO_RESOURCES = """
+apiVersion: v1
+kind: Pod
+metadata:
+  name: live-noncompliant
+spec:
+  containers:
+  - name: app
+    image: registry.k8s.io/pause:3.9
+"""
+
+POD_WITH_RESOURCES = """
+apiVersion: v1
+kind: Pod
+metadata:
+  name: live-compliant
+spec:
+  containers:
+  - name: app
+    image: registry.k8s.io/pause:3.9
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+"""
+
+
+def kubectl(*args: str, manifest: Optional[str] = None) -> subprocess.CompletedProcess:
+    """Run kubectl, optionally feeding a manifest on stdin."""
+    return subprocess.run(
+        ["kubectl", *args], input=manifest, capture_output=True, text=True, timeout=60
+    )
+
+
+def dry_run(manifest: str) -> subprocess.CompletedProcess:
+    """Submit a manifest through the admission webhook without creating it."""
+    return kubectl(
+        "apply", "--dry-run=server", "-n", TEST_NAMESPACE, "-f", "-", manifest=manifest
+    )
+
+
+@unittest.skipUnless(LIVE, "live cluster tests need --live")
+class TestLiveGatekeeper(unittest.TestCase):
+    """Check that Gatekeeper rejects and admits pods on a real cluster."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.addClassCleanup(cls._cleanup)
+
+        if kubectl("get", "crd", "k8srequiredresources.constraints.gatekeeper.sh").returncode:
+            raise RuntimeError(
+                "K8sRequiredResources CRD not found. Apply constraint-template.yaml "
+                "(README 2.1) and make sure Gatekeeper is running."
+            )
+        for manifest in (TEST_NAMESPACE_MANIFEST, TEST_CONSTRAINT_MANIFEST):
+            result = kubectl("apply", "-f", "-", manifest=manifest)
+            if result.returncode:
+                raise RuntimeError(f"Could not apply test resources: {result.stderr}")
+
+        # Gatekeeper needs a few seconds before a new constraint is enforced.
+        deadline = time.time() + 60
+        while f"[{TEST_CONSTRAINT}]" not in dry_run(POD_NO_RESOURCES).stderr:
+            if time.time() > deadline:
+                raise RuntimeError(f"Constraint {TEST_CONSTRAINT} was not enforced in 60s")
+            time.sleep(3)
+
+    @classmethod
+    def _cleanup(cls):
+        kubectl("delete", "k8srequiredresources", TEST_CONSTRAINT, "--ignore-not-found")
+        kubectl("delete", "namespace", TEST_NAMESPACE, "--ignore-not-found", "--wait=false")
+
+    def test_pod_without_resources_denied(self):
+        """A pod with no requests/limits is rejected by the test constraint."""
+        result = dry_run(POD_NO_RESOURCES)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f"[{TEST_CONSTRAINT}]", result.stderr)
+        self.assertIn("missing resource limits", result.stderr)
+
+    def test_pod_with_resources_admitted(self):
+        """A pod with requests and limits passes admission."""
+        result = dry_run(POD_WITH_RESOURCES)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
 if __name__ == "__main__":
+    if LIVE:
+        sys.argv.remove("--live")
     print("=" * 60)
-    print("Chapter 11: Policy Validation Tests")
+    print("Chapter 11: Policy Validation Tests" + (" (live)" if LIVE else ""))
     print("=" * 60)
     unittest.main(verbosity=2)

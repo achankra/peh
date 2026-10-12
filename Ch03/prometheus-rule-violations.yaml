@@ -1,13 +1,20 @@
 # =============================================================================
 # prometheus-rule-violations.yaml — OPA Gatekeeper Violation Alerting
 # =============================================================================
-# PrometheusRule that fires when teams repeatedly attempt forbidden operations.
-# Gatekeeper exposes a gatekeeper_violations_total metric — this rule turns
-# spikes in that metric into actionable alerts routed to the security team.
+# PrometheusRule that fires when teams repeatedly attempt forbidden operations
+# or when resources violate a policy that is already enforced.
+# It uses Gatekeeper's native metrics:
+#   - gatekeeper_validation_request_count_total{admission_status}  (admission
+#     requests allowed/denied by the webhook, a counter)
+#   - gatekeeper_violations{enforcement_action}                    (violations
+#     found by the last audit run, a gauge)
+# Gatekeeper does not expose a gatekeeper_violations_total metric, and none of
+# its native metrics carry the namespace of the offending resource.
 #
 # Prerequisites:
 #   - kube-prometheus-stack (or Prometheus Operator) installed
-#   - Gatekeeper installed and metrics scraping enabled
+#   - Gatekeeper installed and scraped by Prometheus, e.g. with the
+#     ServiceMonitor in Ch11/gatekeeper-metrics-servicemonitor.yaml
 #
 # Usage:
 #   kubectl apply -f prometheus-rule-violations.yaml
@@ -24,7 +31,10 @@ metadata:
   name: opa-violations
   namespace: gatekeeper-system
   labels:
-    # Required by kube-prometheus-stack to discover this rule
+    # Prometheus only loads rules whose "release" label matches its ruleSelector,
+    # which is the Helm release name of kube-prometheus-stack ("kube-prometheus-stack"
+    # for both the Chapter 2 Flux install and the Chapter 4 helm install). Check yours with:
+    #   kubectl get prometheus -n monitoring -o jsonpath='{.items[0].spec.ruleSelector}'
     release: kube-prometheus-stack
     app: gatekeeper
 spec:
@@ -32,41 +42,41 @@ spec:
     - name: opa.rules
       interval: 30s
       rules:
-        # ── Alert: sustained high violation rate ──────────────────────────────
-        # Fires when teams are generating more than 0.1 policy violations per
+        # ── Alert: sustained high admission denial rate ───────────────────────
+        # Fires when Gatekeeper denies more than 0.1 admission requests per
         # second averaged over 5 minutes. This typically indicates a broken
         # CI/CD pipeline attempting forbidden operations repeatedly.
         - alert: HighPolicyViolationRate
-          expr: rate(gatekeeper_violations_total[5m]) > 0.1
+          expr: sum(rate(gatekeeper_validation_request_count_total{admission_status="deny"}[5m])) > 0.1
           for: 2m
           labels:
             severity: warning
             team: platform
           annotations:
-            summary: "High rate of OPA policy violations ({{ $value | humanize }} per second)"
+            summary: "High rate of OPA policy denials ({{ $value | humanize }} per second)"
             description: >
               Teams are frequently attempting forbidden operations.
               Check which constraint is being violated most often:
               kubectl get constraints -A
             runbook_url: "https://wiki.internal/platform/runbooks/opa-violations"
 
-        # ── Alert: any new admission denial in platform namespaces ────────────
-        # Fires immediately when a resource is denied in a platform-owned
-        # namespace (istio-system, flux-system, etc.) — these are higher
-        # severity because they may indicate a misconfigured operator or
-        # a platform team workflow issue.
-        - alert: PlatformNamespacePolicyViolation
-          expr: |
-            increase(gatekeeper_violations_total{
-              namespace=~"flux-system|istio-system|cert-manager|gatekeeper-system"
-            }[5m]) > 0
-          for: 0m
+        # ── Alert: existing resources violate an enforced policy ──────────────
+        # Fires when the audit finds resources that violate a constraint in
+        # "deny" mode, for example workloads that predate the policy or that
+        # were created while the webhook was unavailable. Dry-run (audit-only)
+        # constraints are not counted. The metric has no namespace label, so
+        # find the offenders with:
+        #   kubectl get constraints -A   (look at TOTAL-VIOLATIONS)
+        #   kubectl describe <kind> <name>
+        - alert: EnforcedPolicyViolationsPresent
+          expr: sum(gatekeeper_violations{enforcement_action="deny"}) > 0
+          for: 10m
           labels:
-            severity: critical
+            severity: warning
             team: platform
           annotations:
-            summary: "Policy violation in platform namespace {{ $labels.namespace }}"
+            summary: "{{ $value }} resources violate an enforced Gatekeeper policy"
             description: >
-              A Gatekeeper policy was violated in a platform-managed namespace.
-              This is unexpected and may indicate a misconfigured operator.
-              Inspect: kubectl get events -n {{ $labels.namespace }} --field-selector reason=FailedCreate
+              The Gatekeeper audit found resources that violate constraints
+              in deny mode. Inspect the constraints with
+              kubectl get constraints -A and fix or exempt the listed resources.

@@ -17,6 +17,10 @@ metadata:
   name: production
   labels:
     istio-injection: enabled
+    # Required by the Gatekeeper policy namespace-must-have-team (Ch02/Ch11)
+    team: platform
+    environment: prod
+    cost-center: "1000"
 
 ---
 # Stable deployment (current production version)
@@ -41,16 +45,16 @@ spec:
         version: stable
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
+        prometheus.io/port: "5001"
         prometheus.io/path: "/metrics"
     spec:
       containers:
       - name: app
-        image: myregistry.azurecr.io/myapp:v1.0.0
+        image: ghcr.io/myorg/ch8-demo-app:v1.0.0
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
-          containerPort: 8080
+          containerPort: 5001
           protocol: TCP
         
         # Resource requests for proper scaling
@@ -65,7 +69,7 @@ spec:
         # Liveness probe - restart if app crashes
         livenessProbe:
           httpGet:
-            path: /health/live
+            path: /health
             port: http
           initialDelaySeconds: 10
           periodSeconds: 10
@@ -75,7 +79,7 @@ spec:
         # Readiness probe - only send traffic when ready
         readinessProbe:
           httpGet:
-            path: /health/ready
+            path: /health
             port: http
           initialDelaySeconds: 5
           periodSeconds: 5
@@ -86,6 +90,10 @@ spec:
         env:
         - name: VERSION
           value: "stable"
+        - name: DEPLOYMENT_COLOR  # reported by /health
+          value: "stable"
+        - name: APP_VERSION
+          value: "1.0.0"
         - name: LOG_LEVEL
           value: "INFO"
 
@@ -112,16 +120,16 @@ spec:
         version: canary
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
+        prometheus.io/port: "5001"
         prometheus.io/path: "/metrics"
     spec:
       containers:
       - name: app
-        image: myregistry.azurecr.io/myapp:v1.1.0-canary
+        image: ghcr.io/myorg/ch8-demo-app:v1.1.0
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
-          containerPort: 8080
+          containerPort: 5001
           protocol: TCP
         
         resources:
@@ -134,7 +142,7 @@ spec:
         
         livenessProbe:
           httpGet:
-            path: /health/live
+            path: /health
             port: http
           initialDelaySeconds: 10
           periodSeconds: 10
@@ -143,7 +151,7 @@ spec:
         
         readinessProbe:
           httpGet:
-            path: /health/ready
+            path: /health
             port: http
           initialDelaySeconds: 5
           periodSeconds: 5
@@ -153,6 +161,10 @@ spec:
         env:
         - name: VERSION
           value: "canary"
+        - name: DEPLOYMENT_COLOR  # reported by /health
+          value: "canary"
+        - name: APP_VERSION
+          value: "1.1.0"
         - name: LOG_LEVEL
           value: "DEBUG"  # Extra logging for canary validation
 
@@ -243,7 +255,7 @@ metadata:
   name: myapp
   namespace: production
   labels:
-    release: prometheus
+    release: kube-prometheus-stack
 spec:
   selector:
     matchLabels:

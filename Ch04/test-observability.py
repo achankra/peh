@@ -27,7 +27,8 @@ class TestOTELCollector(unittest.TestCase):
 
     def test_collector_has_all_pipelines(self):
         """OTEL config should have metrics, traces, and logs pipelines."""
-        content = open(os.path.join(self.code_dir, "otel-collector-config.yaml")).read()
+        with open(os.path.join(self.code_dir, "otel-collector-config.yaml")) as f:
+            content = f.read()
         for pipeline in ["metrics", "traces", "logs"]:
             self.assertIn(pipeline, content, f"Missing {pipeline} pipeline")
 
@@ -56,7 +57,8 @@ class TestAlertRules(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(os.path.dirname(__file__), "alert-rules.yaml")))
 
     def test_alert_rules_have_severity(self):
-        content = open(os.path.join(os.path.dirname(__file__), "alert-rules.yaml")).read()
+        with open(os.path.join(os.path.dirname(__file__), "alert-rules.yaml")) as f:
+            content = f.read()
         self.assertIn("severity", content, "Alert rules should have severity labels")
 
 

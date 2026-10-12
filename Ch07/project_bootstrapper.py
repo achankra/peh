@@ -842,7 +842,7 @@ if __name__ == '__main__':
                 else:
                     print(f"Error: {error}")
             else:
-                print("Usage: project-bootstrapper.py bootstrap <team> <project> [language] [description]")
+                print("Usage: project_bootstrapper.py bootstrap <team> <project> [language] [description]")
         
         elif sys.argv[1] == 'templates':
             print("\nAvailable templates:")
@@ -853,4 +853,4 @@ if __name__ == '__main__':
             print(f"Unknown command: {sys.argv[1]}")
     
     else:
-        print("Usage: project-bootstrapper.py <bootstrap|templates> [args...]")
+        print("Usage: project_bootstrapper.py <bootstrap|templates> [args...]")

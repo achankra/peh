@@ -95,12 +95,14 @@ spec:
 
 ---
 # Certificate: Internal CA Certificate
-# Generate a self-signed CA that can issue other certificates
+# Generate a self-signed CA that can issue other certificates.
+# Lives in the cert-manager namespace: a ClusterIssuer (internal-ca-issuer)
+# reads its CA secret from cert-manager's cluster resource namespace.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: internal-ca
-  namespace: platform-engineering
+  namespace: cert-manager
   labels:
     app: platform-engineering
     component: tls

@@ -1,7 +1,9 @@
 # Chapter 12: Vertical Pod Autoscaler Configuration
-# Listing 12.4 - VPA for checkout-api with Auto mode
+# Listing 12.4 - VPA for checkout-api with automatic updates
 # VPA adjusts CPU/memory requests for the checkout-api based on actual usage,
 # with bounds to prevent under/over-provisioning.
+# "Recreate" evicts pods and recreates them with the new requests. It replaces
+# the deprecated "Auto" mode, which behaves the same way.
 
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
@@ -14,7 +16,7 @@ spec:
     kind: Deployment
     name: checkout-api
   updatePolicy:
-    updateMode: "Auto"
+    updateMode: "Recreate"
     minReplicas: 2
   resourcePolicy:
     containerPolicies:

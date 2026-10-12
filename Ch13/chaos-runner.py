@@ -51,6 +51,32 @@ class ExperimentMetrics:
     latency_p99: float
     pod_restarts: int
     pods_affected: int
+    data_available: bool = True
+
+
+def experiment_phase(experiment: Dict) -> str:
+    """Summarize a PodChaos/NetworkChaos object as an ExperimentStatus value.
+
+    Chaos Mesh 2.x has no single phase field; progress is reported through the
+    AllInjected / AllRecovered conditions and status.experiment.desiredPhase.
+    """
+    conditions = {
+        c.get("type"): c.get("status")
+        for c in experiment.get("status", {}).get("conditions", [])
+    }
+    desired = experiment.get("status", {}).get("experiment", {}).get("desiredPhase")
+
+    if desired == "Stop" and conditions.get("AllRecovered") == "True":
+        return ExperimentStatus.COMPLETED.value
+    # pod-kill and container-kill are one-shot: they inject once and never "recover"
+    if (experiment.get("spec", {}).get("action") in ("pod-kill", "container-kill")
+            and conditions.get("AllInjected") == "True"):
+        return ExperimentStatus.COMPLETED.value
+    if conditions.get("Paused") == "True":
+        return ExperimentStatus.PAUSED.value
+    if conditions.get("AllInjected") == "True":
+        return ExperimentStatus.RUNNING.value
+    return ExperimentStatus.PENDING.value
 
 
 class ChaosExperimentRunner:
@@ -116,10 +142,18 @@ class ChaosExperimentRunner:
             return False
         
         logger.info(f"Experiment created: {experiment_name}")
+        # `kubectl apply` prints "podchaos.chaos-mesh.org/<name> created|configured|unchanged";
+        # keep the PodChaos/NetworkChaos names so they can be waited on individually
+        objects = [
+            line.split()[0].split("/", 1)[1]
+            for line in stdout.splitlines()
+            if line.startswith(("podchaos.", "networkchaos."))
+        ]
         self.experiments[experiment_name] = {
             "status": ExperimentStatus.PENDING.value,
             "created_at": datetime.utcnow().isoformat(),
-            "yaml_file": yaml_file
+            "yaml_file": yaml_file,
+            "objects": objects
         }
         return True
 
@@ -174,7 +208,7 @@ class ChaosExperimentRunner:
                 result.append({
                     "name": exp.get("metadata", {}).get("name"),
                     "kind": exp.get("kind"),
-                    "status": exp.get("status", {}).get("experiment", {}).get("phase"),
+                    "status": experiment_phase(exp),
                     "created": exp.get("metadata", {}).get("creationTimestamp")
                 })
             
@@ -239,15 +273,12 @@ class ChaosExperimentRunner:
         
         while time.time() - start_time < timeout_seconds:
             status = self.get_experiment_status(experiment_name)
-            phase = status.get("status", {}).get("experiment", {}).get("phase")
-            
-            if phase == "Completed":
+            phase = experiment_phase(status) if status else None
+
+            if phase == ExperimentStatus.COMPLETED.value:
                 logger.info(f"Experiment completed: {experiment_name}")
                 return True
-            elif phase == "Failed":
-                logger.error(f"Experiment failed: {experiment_name}")
-                return False
-            
+
             logger.info(f"Experiment status: {phase}")
             time.sleep(10)
         
@@ -283,33 +314,42 @@ class ChaosExperimentRunner:
         
         # Query Prometheus for metrics
         # This is a simplified example
+        results = []  # raw query results; None means Prometheus had no data
         try:
             # Query error rate
             error_rate = self._query_prometheus(
                 'rate(http_requests_total{status=~"5.."}[5m])'
             )
+            results.append(error_rate)
             metrics.error_rate = float(error_rate) if error_rate else 0.0
             
             # Query latency percentiles
             p99 = self._query_prometheus(
                 'histogram_quantile(0.99, rate(request_duration_seconds_bucket[5m]))'
             )
+            results.append(p99)
             metrics.latency_p99 = float(p99) if p99 else 0.0
             
             p95 = self._query_prometheus(
                 'histogram_quantile(0.95, rate(request_duration_seconds_bucket[5m]))'
             )
+            results.append(p95)
             metrics.latency_p95 = float(p95) if p95 else 0.0
             
             # Query pod restarts
             restarts = self._query_prometheus(
                 'increase(kube_pod_container_status_restarts_total[5m])'
             )
+            results.append(restarts)
             metrics.pod_restarts = int(float(restarts)) if restarts else 0
             
         except Exception as e:
             logger.warning(f"Failed to collect Prometheus metrics: {e}")
-        
+
+        # No result at all: Prometheus unreachable on localhost:9090, or the workload
+        # does not export these metrics. A real zero is still data.
+        metrics.data_available = any(value is not None for value in results)
+
         metrics.end_time = datetime.utcnow().isoformat()
         return metrics
 
@@ -325,10 +365,11 @@ class ChaosExperimentRunner:
         try:
             # This assumes Prometheus is accessible at localhost:9090
             # In production, use requests library or official client
+            import urllib.parse
             import urllib.request
             import json
-            
-            url = f"http://localhost:9090/api/v1/query?query={query}"
+
+            url = f"http://localhost:9090/api/v1/query?query={urllib.parse.quote(query)}"
             with urllib.request.urlopen(url, timeout=5) as response:
                 data = json.loads(response.read())
                 result = data.get("data", {}).get("result", [])
@@ -403,10 +444,15 @@ class ChaosExperimentRunner:
         
         report.append("RESILIENCE ASSESSMENT:")
         report.append("-" * 70)
-        
+
+        if not metrics.data_available:
+            report.append("! No Prometheus data returned (check the port-forward to localhost:9090")
+            report.append("  and that the workload exports http_requests_total and")
+            report.append("  request_duration_seconds_bucket); the checks below are not meaningful.")
+
         # Assess resilience based on metrics
         assessments = []
-        
+
         if metrics.error_rate < 0.001:
             assessments.append("✓ System maintained availability during experiment")
         else:
@@ -507,7 +553,9 @@ def main():
             
             if success:
                 # Wait for completion and collect metrics
-                runner.wait_for_experiment(exp_name, timeout_seconds=900)
+                # A YAML file can define several experiments; wait for each one
+                for obj_name in runner.experiments[exp_name]["objects"]:
+                    runner.wait_for_experiment(obj_name, timeout_seconds=900)
                 metrics = runner.collect_metrics()
                 report = runner.generate_report(exp_name, metrics)
                 print(report)
@@ -524,8 +572,7 @@ def main():
     # Get status
     if args.get_status:
         status = runner.get_experiment_status(args.get_status)
-        phase = status.get("status", {}).get("experiment", {}).get("phase")
-        print(f"Status: {phase}")
+        print(f"Status: {experiment_phase(status) if status else 'Not found'}")
         sys.exit(0)
     
     # Wait for experiment

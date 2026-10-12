@@ -120,6 +120,7 @@ Python unittest framework for cluster health validation.
 - `modules/flux.py` - Flux configuration module
 - `platform-services.yaml` - Platform services kustomization
 - `istio-mesh-config.yaml` - Istio service mesh configuration
+- `scripts/port-forward.sh` - Background port-forwards for Grafana, Prometheus, Alertmanager
 
 #### modules/flux.py
 
@@ -180,6 +181,7 @@ Kustomization manifest defining cluster-wide platform services via Flux.
     - `K8sRequiredLimits`: Enforce CPU/memory limits on containers
     - `K8sAllowedRegistries`: Whitelist image registries
   - Constraints: require-limits, allowed-registries
+  - Both constraints enforce (`deny`), so they apply to later chapters' workloads and to Kind's own add-ons. If a PersistentVolumeClaim stays `Pending` because the local-path provisioner's `helper-pod` is denied for missing limits, or an image from a new registry (for example Crossplane's `xpkg.crossplane.io` in Chapter 9) is rejected, see the Chapter 9 README troubleshooting section and Step 1.2.
 
 - **Network Policies**:
   - Default deny ingress in application namespace
@@ -236,7 +238,7 @@ Files in the `environments/` tree belong to the **platform-services** repository
 | `environments/base/helm-repos.yaml` | Flux `HelmRepository` CRDs for Istio, cert-manager, Prometheus, OPA, Flux |
 | `environments/base/istio-helm.yaml` | Flux `HelmRelease` CRDs for istio-base, istiod, and istio-ingress (versions omitted — set per env) |
 | `environments/base/kustomization.yaml` | Kustomize root listing base resources for overlay inheritance |
-| `environments/platform-sandbox/istio.yaml` | Version overlay: pins istio-base, istiod, istio-ingress to `1.22.4` for platform-sandbox |
+| `environments/platform-sandbox/istio.yaml` | Version overlay: pins istio-base, istiod, istio-ingress to `1.30.5` for platform-sandbox |
 | `environments/platform-sandbox/kustomization.yaml` | Kustomize overlay: includes base resources + applies `istio.yaml` patch + adds env label |
 | `environments/app-dev/istio.yaml` | Version overlay for app-dev (promoted from sandbox after validation) |
 | `environments/app-dev/kustomization.yaml` | Kustomize overlay for app-dev environment |
@@ -505,17 +507,17 @@ docker info --format '{{.ServerVersion}}'
 
 ### Required Tools
 
-1. **Kind** (v0.20+) - Kubernetes in Docker
+1. **Kind** (v0.33.0) - Kubernetes in Docker
    ```bash
    # macOS: brew install kind
    # Linux:
-   curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+   curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64
    chmod +x ./kind && sudo mv ./kind /usr/local/bin
    ```
 
-2. **kubectl** (v1.26+) - Kubernetes CLI
+2. **kubectl** (v1.37.1) - Kubernetes CLI
    ```bash
-   curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+   curl -LO "https://dl.k8s.io/release/v1.37.1/bin/linux/amd64/kubectl"
    chmod +x kubectl && sudo mv kubectl /usr/local/bin
    ```
 
@@ -524,20 +526,20 @@ docker info --format '{{.ServerVersion}}'
    curl -fsSL https://get.pulumi.com | sh
    ```
 
-4. **Flux CLI** (v2.0+) - GitOps controller
+4. **Flux CLI** (v2.9.6) - GitOps controller
    ```bash
-   curl -s https://fluxcd.io/install.sh | sudo bash
+   curl -s https://fluxcd.io/install.sh | sudo FLUX_VERSION=2.9.6 bash
    ```
 
-5. **Helm** (v3.0+) - Kubernetes package manager
+5. **Helm** (v4.3.0) - Kubernetes package manager
    ```bash
-   curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+   curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | DESIRED_VERSION=v4.3.0 bash
    ```
 
-6. **Kustomize** (v5.0+) - Kubernetes configuration management
+6. **Kustomize** (v5.8.2) - Kubernetes configuration management
    ```bash
    # macOS: brew install kustomize
-   # Linux: curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+   # Linux: curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash -s -- 5.8.2
    ```
 
 7. **bats** (v1.0+) - Bash Automated Testing System
@@ -601,6 +603,8 @@ Successfully installed pulumi-3.x.x pulumi-kubernetes-4.x.x pyyaml-6.x
 
 **Step 2b: Initialize Pulumi Stack**
 ```bash
+# as we are in a dev env. see Ch01 as well
+export PULUMI_CONFIG_PASSPHRASE=""
 pulumi stack init dev
 # Or select existing stack: pulumi stack select dev
 ```
@@ -616,7 +620,7 @@ Default runtime language python
 ```bash
 # For Kind cluster (local development):
 pulumi config set cluster:name platform-dev
-pulumi config set cluster:kubernetesVersion 1.27
+pulumi config set cluster:kubernetesVersion 1.37
 
 pulumi config set cluster:numWorkerNodes 2
 ```
@@ -624,7 +628,7 @@ pulumi config set cluster:numWorkerNodes 2
 **Expected Output:**
 ```
 Set 'cluster:name' to 'platform-dev'
-Set 'cluster:kubernetesVersion' to '1.27'
+Set 'cluster:kubernetesVersion' to '1.37'
 ```
 
 ### Phase 3: Cluster Deployment
@@ -634,7 +638,7 @@ Set 'cluster:kubernetesVersion' to '1.27'
 The Kind cluster must exist **before** running Pulumi. Pulumi provisions namespaces and quotas on an already-running cluster.
 
 ```bash
-kind create cluster --name platform-dev --config - <<EOF
+kind create cluster --name platform-dev --image kindest/node:v1.37.0 --config - <<EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
@@ -652,7 +656,7 @@ EOF
 **Expected Output:**
 ```
 Creating cluster "platform-dev" ...
- ✓ Ensuring node image (kindest/node:v1.28.0) 🖼
+ ✓ Ensuring node image (kindest/node:v1.37.0) 🖼
  ✓ Preparing nodes 📦 📦 📦
  ✓ Writing configuration 📜
  ✓ Starting control-plane 🕹️
@@ -680,6 +684,7 @@ platform-dev-worker2         Ready    <none>          1m    v1.28.0
 Pulumi fetches the kubeconfig from the running Kind cluster automatically and creates namespaces, resource quotas, and limit ranges.
 
 ```bash
+pulumi preview
 pulumi up --yes
 ```
 
@@ -720,12 +725,15 @@ platform-system   Active   10s   environment=dev,managed-by=pulumi
 
 **Step 4a: Install Flux GitOps Controller**
 ```bash
+# check version, which should be as displayed or higher
+flux --version                                                        
+flux version 2.9.6
 # Option 1: Using Flux CLI (recommended)
 flux install --namespace flux-system
 
 # Option 2: Using Helm (alternative)
 helm repo add fluxcd-community https://fluxcd-community.github.io/helm-charts
-helm install flux2 fluxcd-community/flux2 --namespace flux-system --create-namespace
+helm install flux2 fluxcd-community/flux2 --version 2.19.1 --namespace flux-system --create-namespace
 ```
 
 **Expected Output:**
@@ -742,7 +750,7 @@ flux check
 **Expected Output:**
 ```
 ► checking prerequisites
-✓ kubernetes 1.28.0 >= 1.20.6
+✔ Kubernetes 1.37.0 >=1.33.0-0
 ✓ kustomize 5.x.x >= 3.1.0
 ...
 all checks passed
@@ -754,6 +762,8 @@ Apply the manifest. Namespaces, HelmRepositories, and HelmReleases will be creat
 
 ```bash
 kubectl create namespace application
+kubectl apply -f platform-services.yaml
+# after expected warnings run again, as CRDs are installed then
 kubectl apply -f platform-services.yaml
 ```
 
@@ -852,6 +862,35 @@ platform-apps    platform-gateway    2m
 platform-apps    platform-ingress    2m
 ```
 
+### Local UI Access: Grafana, Prometheus, Alertmanager
+
+`scripts/port-forward.sh` starts a background `kubectl port-forward` for each
+observability UI instead of running them by hand. PIDs are tracked in a
+gitignored `scripts/.port-forward.pids` so `stop` kills exactly what `start`
+launched.
+
+```bash
+scripts/port-forward.sh start    # Grafana :3000, Prometheus :9090, Alertmanager :9093
+scripts/port-forward.sh status
+scripts/port-forward.sh stop
+```
+
+Log in to Grafana at [http://localhost:3000](http://localhost:3000) with
+username `admin` and password `admin` — set explicitly via
+`grafana.adminPassword` in `platform-services.yaml` (line ~268).
+
+If you change or remove that value, the chart auto-generates a password
+instead; retrieve it with:
+```bash
+kubectl get secret -n monitoring kube-prometheus-stack-grafana \
+  -o jsonpath='{.data.admin-password}' | base64 -d; echo
+```
+
+Flux and Istio don't have a bundled web UI in this chapter's deployment, so
+they aren't included. If you installed the monitoring stack manually with a
+different Helm release name, override the service names — see the header
+comment in `scripts/port-forward.sh`.
+
 ### Phase 6: Namespace Provisioning
 
 **Step 6a: Provision Application Namespace**
@@ -900,17 +939,16 @@ metadata:
 **Step 7a: Run BATS Tests**
 ```bash
 # From the root code directory
-bats test/infrastructure.bats -v
+bats test/infrastructure.bats --verbose-run
 ```
 
 **Expected Output:**
 ```
- ✓ cluster_is_running
- ✓ namespaces_exist
- ✓ flux_is_ready
- ✓ istio_injection_enabled
-
-4 tests, 0 failures
+1..4
+ok 1 cluster_is_running
+ok 2 namespaces_exist
+ok 3 flux_is_ready
+ok 4 istio_injection_enabled
 ```
 
 **Step 7b: Run Python Health Checks**
@@ -1036,7 +1074,7 @@ Customize cluster parameters:
 # Development cluster
 dev_cluster = KindClusterConfig(
     cluster_name="platform-dev",
-    kubernetes_version="1.27.0",
+    kubernetes_version="1.37.0",
     num_worker_nodes=2,
     enable_ingress=True,
     enable_metrics_server=True,
@@ -1045,7 +1083,7 @@ dev_cluster = KindClusterConfig(
 # Production-like cluster
 prod_cluster = KindClusterConfig(
     cluster_name="platform-prod",
-    kubernetes_version="1.27.0",
+    kubernetes_version="1.37.0",
     num_worker_nodes=3,
     api_server_port=6443,
     extra_port_mappings=[
@@ -1259,6 +1297,14 @@ colima stop
 colima start --cpu 4 --memory 6
 ```
 
+### kube-prometheus-stack HelmRelease Fails on the Admission Hook
+
+**`kube-prometheus-stack` shows `False` with "pre-upgrade hooks failed: timeout waiting for: [Job/monitoring/...-admission-create status: 'InProgress']":**
+
+The `monitoring` namespace is Istio-injected, and the chart's `admission-create` / `admission-patch` Jobs get an `istio-proxy` sidecar that never exits, so the Job never completes and Helm's hook times out (`kubectl get pods -n monitoring` shows the Job pod stuck at `1/2 NotReady`). `platform-services.yaml` already prevents this with `prometheusOperator.admissionWebhooks.patch.podAnnotations: sidecar.istio.io/inject: "false"`. If you see it anyway (for example with an older copy of the manifest), re-apply the current manifest, delete the stuck Job (`kubectl delete job -n monitoring <name>-admission-create`) and let Flux retry.
+
+The HelmRelease sets `releaseName: kube-prometheus-stack`; without it Flux would name the release `monitoring-kube-prometheus-stack`, and every service name and the `release` label that later chapters rely on would change. If you are moving an existing cluster from the old name, delete the HelmRelease first (`kubectl delete helmrelease kube-prometheus-stack -n flux-system`) so Flux uninstalls the old release, then apply the manifest again. PrometheusRules and ServiceMonitors you created yourself keep the old `release` label and must be relabeled (`kubectl label --overwrite ... release=kube-prometheus-stack`).
+
 ### Gatekeeper Webhook Timeout
 
 **`kubectl label namespace` or `kubectl apply` fails with "failed calling webhook check-ignore-label.gatekeeper.sh: context deadline exceeded":**
@@ -1378,6 +1424,31 @@ kubectl get peerauthentication -A
 # Verify sidecar proxies are running
 kubectl get pods -A --field-selector status.phase=Running
 ```
+
+**`upstream connect error ... remote connection failure` (e.g. Grafana cannot query Prometheus) after the laptop slept:**
+
+Istio workload certificates are valid for 24 hours. If the machine sleeps for a long time, some sidecars do not renew their certificate on wake-up. The expired certificate makes every mTLS connection to or from that pod fail, while the pods still show `Running`. Compare each sidecar's certificate expiry with the current time:
+
+```bash
+date -u
+for pod in $(kubectl get pods -A -o json | jq -r '.items[] | select(([.spec.containers[]?.name, .spec.initContainers[]?.name]) | index("istio-proxy")) | "\(.metadata.namespace)/\(.metadata.name)"'); do
+  echo -n "$pod  "
+  kubectl exec -n "${pod%%/*}" "${pod##*/}" -c istio-proxy -- pilot-agent request GET certs 2>/dev/null \
+    | jq -r '[.certificates[]?.cert_chain[]?.expiration_time] | unique | .[0]'
+done
+# Any expiry earlier than the date above is an expired certificate
+```
+
+Restart only the `istio-proxy` container of each affected pod. Kubelet restarts it with a fresh certificate, and the application container, its `emptyDir` data (Prometheus metrics, Grafana state) and the pod itself are left untouched:
+
+```bash
+kubectl exec -n monitoring <pod> -c istio-proxy -- sh -c 'kill -TERM 1'
+
+# Verify: istio-proxy restarts=1, expiry roughly 24 hours from now
+kubectl get pod -n monitoring <pod> -o jsonpath='{range .status.initContainerStatuses[*]}{.name}={.restartCount} {end}{"\n"}'
+```
+
+Deleting the pod also works, but it discards `emptyDir` data, including Prometheus metric history and Grafana's UI-created state.
 
 ### Test Failures
 

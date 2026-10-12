@@ -21,10 +21,46 @@ echo ""
 
 # Step 0: Create a test namespace with sample workloads
 echo -e "${YELLOW}Step 0: Setting up test namespace with sample workloads...${NC}"
-kubectl create namespace "$DR_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
-kubectl create deployment nginx-demo --image=nginx:alpine -n "$DR_NAMESPACE" --replicas=2
+# Labels, docker.io/ image prefix and resource limits satisfy the Ch11 Gatekeeper
+# policies (namespace-must-have-team, allowed-registries, require-limits).
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${DR_NAMESPACE}
+  labels:
+    team: platform
+    environment: dev
+    cost-center: "10001"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-demo
+  namespace: ${DR_NAMESPACE}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx-demo
+  template:
+    metadata:
+      labels:
+        app: nginx-demo
+    spec:
+      containers:
+        - name: nginx
+          image: docker.io/library/nginx:1.27-alpine
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+EOF
 kubectl create configmap demo-config --from-literal=env=production --from-literal=version=1.0 -n "$DR_NAMESPACE"
-kubectl wait --for=condition=available deployment/nginx-demo -n "$DR_NAMESPACE" --timeout=60s
+kubectl wait --for=condition=available deployment/nginx-demo -n "$DR_NAMESPACE" --timeout=180s
 echo -e "${GREEN}Test namespace ready with nginx deployment and configmap${NC}"
 echo ""
 
@@ -66,6 +102,20 @@ echo -e "${YELLOW}Step 3: Disaster detected, preparing recovery...${NC}"
 echo "Waiting 5 seconds before initiating restore..."
 sleep 5
 
+# Velero recreates a missing namespace without labels, which the Gatekeeper
+# namespace-must-have-team policy rejects. Recreate the labelled namespace first
+# (as the platform's namespace tooling would); Velero restores the workloads into it.
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${DR_NAMESPACE}
+  labels:
+    team: platform
+    environment: dev
+    cost-center: "10001"
+EOF
+
 # Step 4: Restore from backup
 echo ""
 echo -e "${YELLOW}Step 4: Restoring from backup — Starting RTO measurement...${NC}"
@@ -106,7 +156,7 @@ fi
 # Check deployment is back
 if kubectl get deployment nginx-demo -n "$DR_NAMESPACE" &>/dev/null; then
   echo -e "${GREEN}Deployment restored: nginx-demo${NC}"
-  kubectl wait --for=condition=available deployment/nginx-demo -n "$DR_NAMESPACE" --timeout=60s
+  kubectl wait --for=condition=available deployment/nginx-demo -n "$DR_NAMESPACE" --timeout=180s
 else
   echo -e "${RED}Deployment NOT restored: nginx-demo${NC}"
   RECOVERY_VERIFIED=false

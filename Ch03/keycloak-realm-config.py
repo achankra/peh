@@ -194,11 +194,6 @@ class KeycloakRealm:
                     'http://localhost:8000',
                     'https://platform.example.com'
                 ],
-                'validRedirectUris': [
-                    'http://localhost:3000/*',
-                    'http://localhost:8000/*',
-                    'https://platform.example.com/*'
-                ],
                 'attributes': {
                     'access.token.lifespan': '3600',
                     'refresh.token.lifespan': '86400'

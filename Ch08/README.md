@@ -144,8 +144,7 @@ python3 pipeline-composer.py --config pipeline-config.yaml --dry-run  # Preview 
 4. **Service**: Exposes both deployments, initially selecting blue
 5. **Ingress**: External traffic routing with TLS
 6. **HPA for Blue**: Auto-scaling based on CPU/memory (2-10 replicas)
-7. **HPA for Green**: Auto-scaling during promotion (0-10 replicas)
-8. **ConfigMap**: Operational scripts for manual deployment procedures
+7. **ConfigMap**: Operational scripts for manual deployment procedures
 **Operational Scripts** (in ConfigMap):
 - `scale-green.sh`: Scale green to match blue replicas
 - `test-green.sh`: Health check green deployment
@@ -163,7 +162,7 @@ python3 pipeline-composer.py --config pipeline-config.yaml --dry-run  # Preview 
 **Chapter Mapping**: Section 8.4 "Canary Deployments with Istio" - Listing 8.4 Canary Manifests
 **Purpose**: Kubernetes and Istio manifests for progressive canary deployments
 **Prerequisites**:
-- Istio 1.10+ with VirtualService and DestinationRule support
+- Istio 1.30.5 with VirtualService and DestinationRule support
 - Prometheus for metrics collection
 - prometheus-operator for ServiceMonitor/PrometheusRule resources
 **Manifest Components**:
@@ -248,13 +247,11 @@ python3 rollback-controller.py --demo  # Simulation mode showing health degradat
 - `collect_all_metrics()`: Multi-workflow metric collection
 **Usage**:
 ```bash
-export GITHUB_TOKEN="ghp_..."
-export GITHUB_OWNER="myorg"
-export GITHUB_REPO="myrepo"
-export OUTPUT_FILE="/tmp/metrics.json"
+cp .env_example .env      # then edit .env (token, owner, repo)
+set -a && source .env && set +a
 python3 scripts/ci_metrics.py
 ```
-**Configuration via Environment Variables**:
+**Configuration via Environment Variables** (defined in `.env_example`):
 - `GITHUB_TOKEN`: GitHub API authentication
 - `GITHUB_OWNER`: Repository owner/organization
 - `GITHUB_REPO`: Repository name
@@ -329,7 +326,7 @@ kubectl get nodes                       # Verify node(s) are Ready
 # Install Prometheus Operator
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
-helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --namespace monitoring --create-namespace --wait
+helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --version 92.1.1 --namespace monitoring --create-namespace --wait
 
 # Install Istio service mesh
 istioctl install --set profile=demo -y && kubectl label namespace default istio-injection=enabled
@@ -342,8 +339,8 @@ istioctl install --set profile=demo -y && kubectl label namespace default istio-
 - **kubectl**: Latest version (for deployment and health monitoring)
 - **Docker/Docker Buildx**: Latest (for container builds in GitHub Actions)
 - **Kubernetes**: 1.24+ (Kind cluster from Chapter 2)
-- **Istio**: 1.10+ (only for canary deployments with traffic splitting — see install instructions below)
-- **Prometheus**: 2.30+ (for metrics collection and canary validation alerts)
+- **Istio**: 1.30.5 (only for canary deployments with traffic splitting — see install instructions below)
+- **Prometheus**: kube-prometheus-stack chart 92.1.1 (for metrics collection and canary validation alerts)
 - **prometheus-operator**: Latest (for ServiceMonitor and PrometheusRule resources)
 
 ### Installing Istio
@@ -355,7 +352,7 @@ Istio is required for the canary deployment steps (Steps 4–5). Install it befo
 brew install istioctl
 
 # Option B: Direct download
-curl -L https://istio.io/downloadIstio | sh -
+curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.30.5 sh -
 export PATH="$PWD/istio-*/bin:$PATH"
 ```
 
@@ -372,7 +369,8 @@ kubectl get pods -n istio-system
 ### Python Dependencies
 
 ```bash
-pip install pyyaml requests pytest --break-system-packages
+python3 -m venv venv && source venv/bin/activate
+pip install pyyaml requests pytest
 ```
 
 ### Environment Setup
@@ -384,12 +382,11 @@ export BW_SESSION=$(bw unlock --raw)
 source load-secrets.sh
 ```
 
-Or export manually:
+Or copy the template to a gitignored `.env`, edit it, and load it into your shell (same pattern as Chapter 7):
 
 ```bash
-export GITHUB_TOKEN=ghp_YourActualTokenHere
-export GITHUB_OWNER=platformetrics
-export GITHUB_REPO=peh-companion-code
+cp .env_example .env      # then edit .env (GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO)
+set -a && source .env && set +a
 ```
 
 ### GitHub Environment
@@ -490,7 +487,15 @@ python3 pipeline-composer.py --config pipeline-config.yaml \
 
 ### Step 3: Deploy Blue-Green to Staging
 
-Set up staging environment with blue-green deployment:
+The manifests deploy a real app: `demo-app/` is a copy of the Chapter 5 demo app (Flask, port 5001). Its only change is that `/health` also returns the `DEPLOYMENT_COLOR` and `APP_VERSION` env vars, so you can see which color answers. The image name uses `ghcr.io/`, which the Chapter 2 allowed-registries policy permits. Replace `myorg` with your GitHub owner if you want to push it later; for Kind you only need to load it. The `staging` namespace carries the `team`, `environment` and `cost-center` labels the Chapter 2 Gatekeeper policy `namespace-must-have-team` requires; without them `kubectl apply` is denied.
+
+Build the image and load it into the Kind cluster (no registry push needed, the manifests use `imagePullPolicy: IfNotPresent`):
+
+```bash
+docker build -t ghcr.io/myorg/ch8-demo-app:v1.0.0 demo-app/
+docker tag ghcr.io/myorg/ch8-demo-app:v1.0.0 ghcr.io/myorg/ch8-demo-app:v1.1.0   # same code, "new version" for green
+kind load docker-image ghcr.io/myorg/ch8-demo-app:v1.0.0 ghcr.io/myorg/ch8-demo-app:v1.1.0 --name platform-dev
+```
 
 ```bash
 # Apply blue-green manifests to staging cluster
@@ -518,11 +523,14 @@ kubectl rollout status deployment/myapp-green -n staging --timeout=5m
 
 # 3. Run tests against green (via port-forward)
 # Note: If port 8080 is in use by Kind, use a different local port (e.g., 8081)
-kubectl port-forward -n staging svc/myapp-green 8081:8080 &
-curl -f http://localhost:8081/health/ready && echo "Green is healthy"
+kubectl port-forward -n staging deploy/myapp-green 8081:5001 &
+curl -f http://localhost:8081/health && echo "Green is healthy"
+# {"color":"green","status":"healthy","version":"1.1.0"}
 
-# 4. Switch traffic to green
+# 4. Switch traffic to green, then confirm through the Service which color answers
 kubectl patch service myapp -n staging -p '{"spec":{"selector":{"color":"green"}}}'
+kubectl port-forward -n staging svc/myapp 8082:8080 &
+curl -s http://localhost:8082/health   # "color":"green" now (it said "blue" before the patch)
 
 # 5. Monitor for issues (5-10 minutes, press Ctrl+C to stop)
 watch kubectl get pods -n staging
@@ -554,6 +562,19 @@ kubectl get vs -n production
 kubectl get dr -n production
 
 # Expected output shows stable (3 replicas) and canary (1 replica)
+# Pods should be 2/2 (app + Istio sidecar): kubectl get pods -n production
+```
+
+The canary uses the same image as blue-green (`ghcr.io/myorg/ch8-demo-app`, loaded into Kind in Step 3): stable runs `v1.0.0`, canary runs `v1.1.0`, and `/health` reports which one answered. The `production` namespace carries the `team`, `environment` and `cost-center` labels required by the Chapter 2 Gatekeeper policy.
+
+**See the traffic split.** The VirtualService only applies to callers inside the mesh, so send requests from a pod that has the Istio sidecar (a stable pod works, and its image already has Python):
+
+```bash
+POD=$(kubectl get pod -n production -l version=stable -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n production $POD -c app -- python -c '
+import urllib.request, json, collections
+print(dict(collections.Counter(json.load(urllib.request.urlopen("http://myapp:8080/health"))["color"] for _ in range(100))))'
+# ~90/10 initially, e.g. {'stable': 89, 'canary': 11}; rerun after each patch below
 ```
 
 **Canary Promotion Procedure**:
@@ -601,11 +622,15 @@ python3 rollback-controller.py --demo
 # Check #3: 1/3 ready - CRITICAL - Triggering rollback
 # Check #4: 3/3 ready - Rollback complete - Healthy
 
-# Real deployment monitoring
-python3 rollback-controller.py \
-  --deployment myapp \
+# Real deployment monitoring (the canary stack's stable deployment is app-stable)
+python3 -u rollback-controller.py \
+  --deployment app-stable \
   --namespace production
+# Monitoring app-stable in production...
+#   Check #1: OK
 ```
+
+> **Note:** the controller reads its options from `sys.argv` by hand, so `--help` is *not* supported: it starts monitoring with the defaults (`demo-app` in `default`). Always pass `--deployment` and `--namespace`, or use `--demo`.
 
 **Integration with Deployment Job**:
 
@@ -633,11 +658,9 @@ Add to your deployment workflow:
 Set up CI/CD metrics collection:
 
 ```bash
-# Set up environment
-export GITHUB_TOKEN="ghp_your_token_here"
-export GITHUB_OWNER="myorg"
-export GITHUB_REPO="myrepo"
-export OUTPUT_FILE="/tmp/ci-metrics.json"
+# Set up environment (see "Environment Setup" above)
+cp .env_example .env      # then edit .env
+set -a && source .env && set +a
 
 # Run metrics collector
 python3 scripts/ci_metrics.py
@@ -663,8 +686,10 @@ python3 scripts/ci_metrics.py
 # }
 
 # Review metrics file
-cat /tmp/ci-metrics.json | jq '.workflows."backend-pipeline.yml".current_metrics'
+cat ci-metrics.json | jq '.workflows."backend-pipeline.yml".current_metrics'
 ```
+
+> **Note:** the script reads `GITHUB_OWNER`/`GITHUB_REPO` and queries each workflow by file name. If the repository has no `backend-pipeline.yml` / `frontend-pipeline.yml` (or no runs yet), it prints a `404 Not Found` per workflow and writes an empty `"workflows": {}`. Push the Ch08 workflows to the repo and let them run once, or set `WORKFLOWS` in `.env` to workflows that exist.
 
 **Integration with Dashboards**:
 - Feed JSON output to Grafana for visualization

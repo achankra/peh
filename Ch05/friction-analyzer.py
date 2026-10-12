@@ -114,6 +114,7 @@ class FrictionAnalyzer:
         lines = content.strip().split('\n')
 
         current_step = {}
+        in_steps = False
         for line in lines:
             line = line.strip()
             if not line or line.startswith('#'):
@@ -125,6 +126,14 @@ class FrictionAnalyzer:
             key, value = line.split(':', 1)
             key = key.strip().lstrip('- ')
             value = value.strip()
+
+            # Skip workflow-level metadata (name, description) before "steps:"
+            if not in_steps:
+                in_steps = key == "steps"
+                continue
+
+            if key != "dependencies":
+                value = value.strip('"\'')
 
             if key == "name":
                 if current_step:

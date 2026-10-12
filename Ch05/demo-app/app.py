@@ -275,14 +275,14 @@ app = create_flask_app()
 
 if __name__ == "__main__":
     if app:
-        print("Starting Flask application on http://0.0.0.0:5000")
-        app.run(host="0.0.0.0", port=5000, debug=False)
+        print("Starting Flask application on http://0.0.0.0:5001")
+        app.run(host="0.0.0.0", port=5001, debug=False)
     else:
         print("Flask not installed. Install with: pip install flask")
         print("Attempting to run with wsgiref (WSGI reference server)...")
         from wsgiref.simple_server import make_server
 
         wsgi_app = Application()
-        server = make_server("0.0.0.0", 5000, wsgi_app)
-        print("Starting application on http://0.0.0.0:5000")
+        server = make_server("0.0.0.0", 5001, wsgi_app)
+        print("Starting application on http://0.0.0.0:5001")
         server.serve_forever()

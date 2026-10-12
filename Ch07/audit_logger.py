@@ -172,8 +172,15 @@ class AuditLogger:
         Returns:
             List of all events related to this team
         """
-        return self.get_events(resource_id=team_id, limit=10000)
-    
+        # Team events use resource IDs like "<team>", "<team>/<email>" and
+        # "<team>/<project>", so match the team ID and its sub-resources
+        events = self.get_events(limit=10000)
+        return [
+            e for e in events
+            if e.get('resource_id') == team_id
+            or str(e.get('resource_id', '')).startswith(f"{team_id}/")
+        ]
+
     def get_member_history(self, team_id: str, member_email: str) -> List[Dict[str, Any]]:
         """
         Get complete audit history for a specific team member.

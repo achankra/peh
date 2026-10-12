@@ -9,7 +9,11 @@ kind: Namespace
 metadata:
   name: spot-instances
   labels:
-    team: platform-engineering
+    # Required by the Gatekeeper namespace-must-have-team policy
+    # (team: letters only, 2-20 chars; environment: dev|staging|prod; cost-center: 4-6 digits)
+    team: platform
+    environment: dev
+    cost-center: "10001"
 
 ---
 # Example 1: Deployment with spot instance affinity
@@ -77,7 +81,9 @@ spec:
       
       containers:
       - name: app
-        image: nginx:latest
+        # Images must come from a registry the Gatekeeper allowed-registries
+        # policy permits (docker.io/ is allowed, a bare name is not).
+        image: docker.io/library/nginx:1.27
         ports:
         - containerPort: 80
         resources:
@@ -158,9 +164,8 @@ spec:
               - key: aws.amazon.com/ec2spot
                 operator: NotIn
                 values: ["true"]
-      
-      # Pod anti-affinity to distribute across nodes
-      affinity:
+
+        # Pod anti-affinity to distribute across nodes
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
           - labelSelector:
@@ -172,7 +177,7 @@ spec:
       
       containers:
       - name: app
-        image: nginx:latest
+        image: docker.io/library/nginx:1.27
         ports:
         - containerPort: 80
         resources:
@@ -254,7 +259,15 @@ spec:
       
       containers:
       - name: handler
-        image: spot-termination-handler:latest
+        # Placeholder: replace with your real termination-handler image
+        image: registry.k8s.io/pause:3.9
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
         env:
         - name: NODE_NAME
           valueFrom:
@@ -375,7 +388,9 @@ spec:
           
           containers:
           - name: processor
-            image: batch-processor:latest
+            # Placeholder: replace with your real batch image
+            image: docker.io/library/busybox:1.36
+            command: ["sh", "-c", "echo processing batch"]
             resources:
               requests:
                 cpu: 500m

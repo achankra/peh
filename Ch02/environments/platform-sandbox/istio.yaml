@@ -20,7 +20,7 @@ metadata:
 spec:
   chart:
     spec:
-      version: "1.22.4"   # Pin to a specific patch release — never use wildcards
+      version: "1.30.5"   # Pin to a specific patch release — never use wildcards
 
 ---
 # Patch: pin istiod version for platform-sandbox
@@ -32,7 +32,7 @@ metadata:
 spec:
   chart:
     spec:
-      version: "1.22.4"
+      version: "1.30.5"
 
 ---
 # Patch: pin istio-ingress version for platform-sandbox
@@ -44,4 +44,4 @@ metadata:
 spec:
   chart:
     spec:
-      version: "1.22.4"
+      version: "1.30.5"

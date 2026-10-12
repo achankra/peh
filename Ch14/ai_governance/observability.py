@@ -14,7 +14,7 @@ import time
 import logging
 from typing import Callable, Any, Dict, Optional
 from functools import wraps
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 from prometheus_client import Counter, Histogram, Gauge, CollectorRegistry
@@ -206,7 +206,7 @@ class AgentCallTracker:
         
         # Create call record
         call_record = {
-            "timestamp": datetime.utcnow().isoformat() + 'Z',
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "agent_type": agent_type,
             "action_type": action_type,
             "duration_seconds": duration_seconds,
@@ -286,7 +286,7 @@ class AgentCallTracker:
 
         # Log the call
         record = {
-            "timestamp": datetime.utcnow().isoformat() + 'Z',
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "event_type": "llm_call",
             "agent_type": agent_type,
             "model": model,
@@ -505,8 +505,9 @@ if __name__ == "__main__":
             "status": "success"
         }
     
-    # Call the function
-    result = example_agent_call()
+    # Call the function. The decorator reads agent_type/action_type from the
+    # call's keyword arguments, so pass them explicitly.
+    result = example_agent_call(agent_type="example", action_type="test")
     print(f"Result: {result}")
     
     # Get statistics

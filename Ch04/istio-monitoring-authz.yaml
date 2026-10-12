@@ -1,0 +1,44 @@
+# Istio policies for the monitoring namespace
+#
+# Problem: the mesh-wide policies from Chapter 2 (STRICT mTLS plus an
+# "allow-external" allow-list) break the monitoring stack in two ways:
+#
+# 1. Grafana -> Prometheus queries fail with "RBAC: access denied", because
+#    allow-external only admits /api/* from the application namespace.
+# 2. Prometheus cannot scrape its meshed targets (kube-state-metrics,
+#    Alertmanager, Grafana, the operator). Prometheus discovers targets by pod
+#    IP, and Envoy sends pod-IP traffic as plaintext passthrough, which STRICT
+#    mTLS rejects (HTTP 503).
+#
+# Fix: allow in-namespace traffic, and let metrics endpoints accept plaintext
+# scrapes. Both stay scoped to the monitoring namespace. ALLOW policies are
+# additive, so nothing existing is removed.
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-monitoring-internal
+  namespace: monitoring
+spec:
+  action: ALLOW
+  rules:
+    # mTLS traffic between monitoring workloads (Grafana -> Prometheus, etc.).
+    # "opencost" (Chapter 12) queries Prometheus; it must have the Istio sidecar
+    # injected so its mTLS identity matches here.
+    - from:
+        - source:
+            namespaces: ["monitoring", "opencost"]
+    # Plaintext metrics scrapes (no mTLS identity, so match on the path instead)
+    - to:
+        - operation:
+            methods: ["GET"]
+            paths: ["/metrics", "/stats/prometheus"]
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: allow-plaintext-scrape
+  namespace: monitoring
+spec:
+  mtls:
+    mode: PERMISSIVE

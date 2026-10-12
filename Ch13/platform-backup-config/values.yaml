@@ -8,67 +8,108 @@
 #
 # No cloud provider required — everything runs locally on Kind.
 #
+# Written against the vmware-tanzu/velero chart 12.x (Velero 1.18). Verify with:
+#   helm template velero vmware-tanzu/velero -n velero -f platform-backup-config/values.yaml
+#
 # Installation:
 #   helm repo add vmware-tanzu https://vmware-tanzu.github.io/helm-charts
-#   helm install velero vmware-tanzu/velero -f platform-backup-config/values.yaml
+#   helm install velero vmware-tanzu/velero -n velero -f platform-backup-config/values.yaml
+#
+# With the Ch03/Ch11 Gatekeeper policies active, create the velero namespace first
+# with team/environment/cost-center labels (see Step 2.1) instead of --create-namespace.
+# Every container in this file sets resource limits and uses a docker.io/ or
+# registry.k8s.io image for the same reason.
 
 # ============================================================================
 # Velero Core Configuration
 # ============================================================================
 
-velero:
-  # Image configuration
-  image:
-    repository: velero/velero
-    tag: v1.12.0
-    pullPolicy: IfNotPresent
+# Image configuration
+image:
+  repository: docker.io/velero/velero
+  tag: v1.18.2
+  pullPolicy: IfNotPresent
 
-  # Namespace where Velero is installed
-  namespace:
-    create: true
-    name: velero
+# The service account is created by the chart (serviceAccount.server.create: true by default)
 
-  # Service account configuration
-  serviceAccount:
-    create: true
-    name: velero
+# Provider plugin: the AWS plugin speaks the S3 API that MinIO implements
+initContainers:
+  - name: velero-plugin-for-aws
+    image: docker.io/velero/velero-plugin-for-aws:v1.8.0
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    volumeMounts:
+      - mountPath: /target
+        name: plugins
 
 # ============================================================================
-# Backup Storage Configuration — MinIO (S3-compatible)
+# Velero Server Configuration
 # ============================================================================
 
 configuration:
+  # ==========================================================================
+  # Backup Storage Configuration — MinIO (S3-compatible)
+  # ==========================================================================
   # Backup storage location (primary) — MinIO inside the cluster
   backupStorageLocation:
-    provider: aws
-    bucket: velero-backups
-    prefix: velero
+    - name: default
+      provider: aws
+      bucket: velero-backups
+      prefix: velero
 
-    # MinIO S3-compatible configuration
-    config:
-      # MinIO endpoint inside the cluster
-      s3Url: http://minio.velero.svc.cluster.local:9000
+      # MinIO S3-compatible configuration
+      config:
+        # MinIO endpoint inside the cluster
+        s3Url: http://minio.velero.svc.cluster.local:9000
 
-      # Region is required by the plugin but arbitrary for MinIO
-      region: us-east-1
+        # Region is required by the plugin but arbitrary for MinIO
+        region: us-east-1
 
-      # Path-style required for MinIO
-      s3ForcePathStyle: "true"
+        # Path-style required for MinIO
+        s3ForcePathStyle: "true"
 
-      # Disable TLS for local MinIO
-      insecureSkipTLSVerify: "true"
+        # Disable TLS for local MinIO
+        insecureSkipTLSVerify: "true"
 
-      # Disable checksum validation
-      checksumAlgorithm: ""
+      # Credentials come from the secret named under `credentials` below
+      credential:
+        name: velero-minio-credentials
+        key: cloud
 
-    # Validation settings
-    validationFrequency: 12h
-    accessMode: ReadWrite
-    default: true
+      # Validation settings
+      validationFrequency: 12h
+      accessMode: ReadWrite
+      default: true
 
-  # Volume snapshots disabled — using file-level backups with restic/kopia
+  # Volume snapshots disabled — using file-level backups (kopia)
   # (Kind does not support CSI volume snapshots out of the box)
-  volumeSnapshotLocation: {}
+  volumeSnapshotLocation: []
+
+  # Server log level
+  logLevel: info
+
+  # Use file-level backups (kopia) by default
+  defaultVolumesToFsBackup: true
+
+  # Defaults for restore operations (comma-separated, highest priority first)
+  restoreResourcePriorities: "customresourcedefinitions,namespaces,clusterrolebindings,clusterroles,storageclasses,persistentvolumes,persistentvolumeclaims,serviceaccounts,secrets,configmaps,deployments.apps,daemonsets.apps,statefulsets.apps"
+
+# File-level backups run through the node-agent DaemonSet
+deployNodeAgent: true
+nodeAgent:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
 
 # ============================================================================
 # Backup Schedules Configuration
@@ -93,44 +134,35 @@ schedules:
         - kube-public
         - kube-node-lease
         - velero
-        - kube-apiserver
 
-      # Resource filtering
-      includeClusterResources: true
+      # Resource filtering (namespaced and cluster-scoped lists are separate;
+      # they cannot be combined with includeClusterResources or excludedResources)
       includedNamespaceScopedResources:
         - deployments
         - daemonsets
         - statefulsets
         - pods
         - persistentvolumeclaims
-        - persistentvolumes
         - configmaps
         - secrets
         - services
         - ingresses
+        - networkpolicies
 
       # Cluster-scoped resources
       includedClusterScopedResources:
+        - persistentvolumes
         - clusterrolebindings
         - clusterroles
         - storageclasses
-        - networkpolicies
 
-      # Exclude certain resource types
-      excludedResources:
-        - events
-        - events.events.k8s.io
-
-      # File-level backup for PVs (restic/kopia)
+      # File-level backup for PVs (kopia)
       snapshotVolumes: false
       defaultVolumesToFsBackup: true
       csiSnapshotTimeout: 10m
 
       # Retention policy - 30 days for daily backups
       ttl: 720h
-
-      # Partial backups are allowed
-      allowEmptySnapshotVolumes: false
 
       # Backup hooks for pre/post-backup operations
       hooks:
@@ -187,10 +219,11 @@ schedules:
                   timeout: 2m
 
       # Labels for backup organization
-      labels:
-        schedule-type: daily
-        retention-policy: "30days"
-        frequency: "daily"
+      metadata:
+        labels:
+          schedule-type: daily
+          retention-policy: "30days"
+          frequency: "daily"
 
   # Hourly backup for production namespace - runs every hour
   hourly-backup-production:
@@ -218,38 +251,11 @@ schedules:
       # Faster timeout for hourly backups
       csiSnapshotTimeout: 5m
 
-      labels:
-        schedule-type: hourly
-        retention-policy: "48hours"
-        frequency: "hourly"
-
-# ============================================================================
-# Velero Server Configuration
-# ============================================================================
-
-configuration:
-  # Server log level
-  logLevel: info
-
-  # Features
-  features: "EnableCSI"
-
-  # Use file-level backups (restic/kopia) by default
-  defaultVolumesToFsBackup: true
-
-  # Defaults for restore operations
-  restoreResourcePriorities:
-    - "namespaces"
-    - "clusterrolebindings"
-    - "clusterroles"
-    - "storageclasses"
-    - "persistentvolumes"
-    - "persistentvolumeclaims"
-    - "secrets"
-    - "configmaps"
-    - "deployments"
-    - "daemonsets"
-    - "statefulsets"
+      metadata:
+        labels:
+          schedule-type: hourly
+          retention-policy: "48hours"
+          frequency: "hourly"
 
 # ============================================================================
 # Credentials Configuration — MinIO
@@ -257,9 +263,10 @@ configuration:
 
 credentials:
   useSecret: true
-  name: velero-minio-credentials
+  # Use a pre-created secret (velero-storage-location.yaml creates it in Step 2.2)
+  existingSecret: velero-minio-credentials
 
-  # Create the credential secret:
+  # To create the secret by hand instead:
   # kubectl create secret generic velero-minio-credentials \
   #   --namespace velero \
   #   --from-file=cloud=./credentials-velero
@@ -273,57 +280,68 @@ credentials:
 # Monitoring and Observability
 # ============================================================================
 
-monitoring:
-  # Prometheus metrics
-  prometheus:
-    enabled: true
-    port: 8085
+metrics:
+  # Prometheus metrics endpoint (port 8085)
+  enabled: true
+  scrapeInterval: 30s
+  scrapeTimeout: 10s
 
   # ServiceMonitor for Prometheus Operator
   serviceMonitor:
     enabled: true
-    namespace: monitoring
-    interval: 30s
-    scrapeTimeout: 10s
+    additionalLabels:
+      release: kube-prometheus-stack
 
-    # Labels for ServiceMonitor
-    labels:
-      release: prometheus
-      monitoring: "true"
-
-  # Alerts for Velero operations
-  alerts:
+  # Alerts for Velero operations. The kube-prometheus-stack in this repo only loads
+  # rules labelled release=kube-prometheus-stack.
+  prometheusRule:
     enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
+    spec:
+      # Alert if 3 backups fail within an hour
+      - alert: VeleroBackupFailure
+        expr: increase(velero_backup_failure_total[1h]) >= 3
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "Velero schedule {{ $labels.schedule }} had 3 or more failed backups in the last hour"
 
-    # Alert thresholds
-    backupFailureAlert:
-      enabled: true
-      threshold: 3  # Alert if 3 consecutive backup failures
-      for: 1h
+      # Alert if backups take longer than 30 minutes (p95)
+      - alert: VeleroBackupSlow
+        expr: histogram_quantile(0.95, sum by (le, schedule) (rate(velero_backup_duration_seconds_bucket[1h]))) > 1800
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Velero schedule {{ $labels.schedule }} p95 backup duration is over 30 minutes"
 
-    backupDurationAlert:
-      enabled: true
-      thresholdSeconds: 1800  # Alert if backup takes >30 minutes
-      for: 10m
+      # Alert if 2 restores fail within an hour
+      - alert: VeleroRestoreFailure
+        expr: increase(velero_restore_failed_total[1h]) >= 2
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "Velero had 2 or more failed restores in the last hour"
 
-    restoreFailureAlert:
-      enabled: true
-      threshold: 2  # Alert if 2 consecutive restore failures
-      for: 1h
+      - alert: VeleroVolumeSnapshotFailure
+        expr: increase(velero_volume_snapshot_failure_total[1h]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Velero volume snapshots are failing"
 
-    volumeSnapshotFailureAlert:
-      enabled: true
-      for: 10m
-
-    storageLocationValidationAlert:
-      enabled: true
-      for: 5m
-
-  # Grafana dashboard
-  dashboard:
-    enabled: true
-    labels:
-      grafana_dashboard: "true"
+      # velero_backup_location_status_gauge: 1 = available, 0 = unavailable
+      - alert: VeleroStorageLocationUnavailable
+        expr: velero_backup_location_status_gauge == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Velero backup location {{ $labels.backup_location_name }} is unavailable"
 
 # ============================================================================
 # Pod and Node Configuration
@@ -334,19 +352,28 @@ podSecurityContext:
   runAsUser: 0
   fsGroup: 0
 
-securityContext:
+containerSecurityContext:
   privileged: false
   readOnlyRootFilesystem: true
   runAsUser: 0
 
-# Resource requests and limits
+# Resource requests and limits (limits are required by the Gatekeeper policy)
 resources:
   requests:
-    cpu: 500m
-    memory: 512Mi
+    cpu: 100m
+    memory: 256Mi
   limits:
     cpu: 1000m
     memory: 1Gi
+
+# The CRD upgrade job (kubectl image from registry.k8s.io) also needs limits
+upgradeJobResources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
 
 # Node selector removed — Kind nodes don't have custom labels
 nodeSelector: {}
@@ -369,83 +396,31 @@ affinity:
 tolerations: []
 
 # ============================================================================
-# Encryption Configuration
+# RBAC
 # ============================================================================
 
-# RBAC for Velero
 rbac:
   create: true
 
-  # Custom ClusterRole for backup operations
-  clusterRole:
-    name: velero
-
-# Encryption — disabled for local MinIO (enable in production)
-encryption:
-  enabled: false
-
 # ============================================================================
-# Backup Hooks and Custom Scripts
+# Notes
 # ============================================================================
 
-# Init containers for custom setup
-initContainers: []
-
-# Sidecar containers for extended functionality
-sidecars: []
-
-# ConfigMaps for custom scripts
-extraMounts: []
-
-# ============================================================================
-# Maintenance and Cleanup
-# ============================================================================
-
-# Backup cleanup policy
-backupDeletionPolicy:
-  # Delete orphaned backups after 24 hours
-  orphanedBackupDeleteInterval: 24h
-
-  # Maintain at least 3 backups per schedule
-  minBackupsPerSchedule: 3
-
-# Restore cleanup
-restoreFailedRetentionDays: 7
-
-# ============================================================================
-# Additional Settings
-# ============================================================================
-
-# Replicas (for high availability)
-replicas: 1
-
-# Update strategy
-strategy:
-  type: Recreate
-
-# Image pull secrets if using private registry
-imagePullSecrets: []
-
-# Priority class for pod scheduling
-priorityClassName: ""
-
-# Service type
-service:
-  type: ClusterIP
-  port: 443
-
-# Ingress for remote access (optional)
-ingress:
-  enabled: false
+# The chart has no values for these; Velero handles them as follows:
+# - Backup cleanup: expired backups are garbage-collected from each backup's `ttl`;
+#   tune the frequency with configuration.garbageCollectionFrequency.
+# - Encryption: not configurable here. Use server-side encryption on the object store
+#   (disabled for local MinIO; enable it in production).
+# - Replicas: Velero runs a single server pod (leader election is not supported).
 
 # ============================================================================
 # Post-Installation Verification
 # ============================================================================
 
-# Verification script to run after installation
-# Run: kubectl exec -n velero deployment/velero -- velero version
-#      kubectl exec -n velero deployment/velero -- velero backup-location get
-#      kubectl exec -n velero deployment/velero -- velero schedule get
+# Verification commands after installation
+# Run: velero version
+#      velero backup-location get
+#      velero schedule get
 #
 # Create sample backup:
 #   velero backup create manual-backup --wait

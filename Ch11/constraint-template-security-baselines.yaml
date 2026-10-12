@@ -15,6 +15,7 @@ spec:
         kind: K8sSecurityBaselines
       validation:
         openAPIV3Schema:
+          type: object
           properties:
             message:
               type: string

@@ -10,7 +10,11 @@ kind: Provider
 metadata:
   name: provider-kubernetes
 spec:
-  package: xpkg.upbound.io/crossplane-contrib/provider-kubernetes:v0.13.0
+  package: xpkg.crossplane.io/crossplane-contrib/provider-kubernetes:v1.3.1
+  # Without this reference the runtime config below is never used and the
+  # provider pod has no resource limits (rejected by the require-limits policy)
+  runtimeConfigRef:
+    name: provider-kubernetes-runtime
 ---
 # DeploymentRuntimeConfig for Kubernetes provider (v2 syntax)
 apiVersion: pkg.crossplane.io/v1beta1
@@ -49,7 +53,31 @@ kind: Function
 metadata:
   name: function-patch-and-transform
 spec:
-  package: xpkg.upbound.io/crossplane-contrib/function-patch-and-transform:v0.7.0
+  package: xpkg.crossplane.io/crossplane-contrib/function-patch-and-transform:v0.11.0
+  runtimeConfigRef:
+    name: function-runtime
+---
+# DeploymentRuntimeConfig for the composition function (resource limits)
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: function-runtime
+spec:
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        metadata: {}
+        spec:
+          containers:
+          - name: package-runtime
+            resources:
+              limits:
+                cpu: 100m
+                memory: 128Mi
+              requests:
+                cpu: 100m
+                memory: 128Mi
 ---
 # Helm provider — deploys Helm charts as Crossplane managed resources
 apiVersion: pkg.crossplane.io/v1
@@ -57,7 +85,9 @@ kind: Provider
 metadata:
   name: provider-helm
 spec:
-  package: xpkg.upbound.io/crossplane-contrib/provider-helm:v0.18.1
+  package: xpkg.crossplane.io/crossplane-contrib/provider-helm:v1.4.0
+  runtimeConfigRef:
+    name: provider-helm-runtime
 ---
 # DeploymentRuntimeConfig for Helm provider (v2 syntax)
 apiVersion: pkg.crossplane.io/v1beta1

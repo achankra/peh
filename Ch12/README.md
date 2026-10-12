@@ -30,7 +30,7 @@ This section maps each file in the code directory to specific chapter sections a
 | File | Section | Purpose |
 |------|---------|---------|
 | `checkout-api-hpa.yaml` | 12.3 Autoscaling Strategies | **Listing 12.3:** HPA configuration for the checkout-api deployment. Scales between 2-10 replicas based on CPU (70%) and memory (80%) utilization with conservative scale-down and aggressive scale-up behaviors. |
-| `checkout-api-vpa.yaml` | 12.3 Autoscaling Strategies | **Listing 12.4:** VPA configuration for checkout-api with Auto mode. Adjusts CPU/memory requests based on observed usage with configurable bounds to prevent under/over-provisioning. |
+| `checkout-api-vpa.yaml` | 12.3 Autoscaling Strategies | **Listing 12.4:** VPA configuration for checkout-api with automatic updates (`Recreate` mode; `Auto` is deprecated in VPA 1.8). Adjusts CPU/memory requests based on observed usage with configurable bounds to prevent under/over-provisioning. |
 | `hpa-config.yaml` | 12.3 Autoscaling Strategies | Extended HPA examples demonstrating CPU-based and custom metrics-based autoscaling with full namespace and deployment setup for a demo application. |
 | `vpa-config.yaml` | 12.3 Autoscaling Strategies | Extended VPA examples showing all three VPA modes: Off (recommendations only), Auto (automatic adjustment), and Recreate (requires pod recreation). Includes RBAC and policy configurations. |
 
@@ -105,8 +105,8 @@ Before deploying the code in this chapter, ensure you have the following prerequ
 
 ### Kubernetes and Core Tools
 - **Kubernetes cluster** (v1.20+): The examples target modern Kubernetes versions with autoscaling support
-- **kubectl** (v1.20+): Configured and authenticated to your cluster
-- **Helm 3**: Required for installing OpenCost, Karpenter, and VPA
+- **kubectl** (v1.37.1): Configured and authenticated to your cluster
+- **Helm 4.3.0**: Required for installing OpenCost, Karpenter, and VPA
 
 ### Observability and Metrics
 - **Prometheus**: Deployed in your cluster (from Chapter 4). OpenCost scrapes Prometheus for cost metrics.
@@ -114,14 +114,14 @@ Before deploying the code in this chapter, ensure you have the following prerequ
   # Deploy if not already installed (e.g., after a Kind cluster restart):
   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
   helm repo update
-  helm install monitoring prometheus-community/kube-prometheus-stack \
+  helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack --version 92.1.1 \
     --namespace monitoring --create-namespace
   # If already installed, this will error with "cannot re-use a name" — that's fine.
   ```
 - **Metrics Server**: Required for HPA and VPA to function. The examples reference CPU and memory utilization metrics.
   ```bash
   # Install if not present:
-  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.0/components.yaml
   ```
   > **Kind cluster note:** Metrics Server may fail on Kind without the `--kubelet-insecure-tls` flag. If `kubectl top nodes` fails, patch the deployment:
   > ```bash
@@ -175,26 +175,32 @@ chmod +x install-opencost.sh
 ./install-opencost.sh
 
 # Expected output:
-# - opencost namespace created
+# - opencost namespace created (with team, environment, cost-center labels)
 # - OpenCost Helm chart installed
 # - opencost pods running
 ```
+
+> **Why the labels:** if the Gatekeeper policy `namespace-must-have-team` (Chapters 3/11) is active, it denies any namespace without `team`, `environment` and `cost-center` labels at creation time. The script creates the `opencost` namespace with `team=platform`, `environment=dev` and `cost-center=10001`, matching the other platform namespaces; edit them in the script to suit your team.
+>
+> **Why the CPU limits:** the Chapter 2/11 `require-limits` policy denies pods that lack a CPU limit, and the OpenCost chart only sets a memory limit. The script sets `500m` (exporter) and `200m` (UI).
+>
+> **Why Istio injection:** if you applied the Chapter 2 mesh policies, Prometheus only accepts queries from namespaces listed in `allow-monitoring-internal`. Without it OpenCost exits with `403 ... RBAC: access denied`. The script labels the namespace `istio-injection=enabled` so OpenCost gets an mTLS identity; apply the updated `Ch04/istio-monitoring-authz.yaml`, which now lists `opencost`, before running it.
 
 **Verify Installation:**
 ```bash
 kubectl get pods -n opencost
 kubectl logs -n opencost deployment/opencost
 
-# Access OpenCost UI (in another terminal — port 9090 serves the web UI)
-kubectl port-forward -n opencost svc/opencost 9090:9090
-# Then open http://localhost:9090 in your browser
+# Access OpenCost UI (in another terminal — port 9091 serves the web UI)
+kubectl port-forward -n opencost svc/opencost 9091:9090
+# Then open http://localhost:9091 in your browser
 
 # Query the cost allocation API (port 9003 serves the REST API, no web UI)
 kubectl port-forward -n opencost svc/opencost 9003:9003
-curl http://localhost:9003/allocation/compute?window=24h&aggregate=namespace
+curl "http://localhost:9003/allocation/compute?window=24h&aggregate=namespace"
 ```
 
-> **Note:** OpenCost exposes two ports: **9090** for the web UI and **9003** for the REST API. The UI at `localhost:9003` will not load — use `localhost:9090` for the dashboard and `localhost:9003` only for API queries.
+> **Note:** OpenCost exposes two ports: **9090** for the web UI and **9003** for the REST API. The UI at `localhost:9003` will not load — use `localhost:9091` for the dashboard and `localhost:9003` only for API queries.
 
 ### Step 3: Apply Cost Allocation Labels to Namespaces
 
@@ -239,11 +245,17 @@ kubectl describe hpa checkout-api-hpa -n team-checkout
 VPA is **not included** in Kubernetes by default — you must install it separately:
 
 ```bash
-# Clone the autoscaler repo and install VPA components
-git clone https://github.com/kubernetes/autoscaler.git /tmp/autoscaler
-kubectl apply -f /tmp/autoscaler/vertical-pod-autoscaler/deploy/
+# Install VPA v1.8.0 straight from the autoscaler repo (no clone needed)
+VPA=https://github.com/kubernetes/autoscaler//vertical-pod-autoscaler
+VPA_REF=vertical-pod-autoscaler/v1.8.0
+kubectl apply -k "$VPA/deploy?ref=$VPA_REF"
 
-# Verify VPA pods are running (ignore v1beta1 CRD errors — they're harmless)
+# The admission controller mounts a TLS secret (vpa-tls-certs) that the manifests
+# do not create; without it the pod hangs in ContainerCreating. Generate it with
+# the upstream script (needs openssl; it creates the secret in kube-system):
+curl -sL "https://raw.githubusercontent.com/kubernetes/autoscaler/$VPA_REF/vertical-pod-autoscaler/pkg/admission-controller/gencerts.sh" | bash
+
+# Verify VPA pods are running
 kubectl get pods -n kube-system | grep vpa
 # Expected: vpa-admission-controller, vpa-recommender, vpa-updater all Running
 ```

@@ -4,18 +4,21 @@
 # This is part of the platform-backup-config Helm chart.
 
 # values.yaml for platform-backup-config chart
-backup:
-  enabled: true
-  schedule: "0 3 * * *"  # Daily at 3 AM
-  retention: "30d"
-
-  selectors:
-    matchLabels:
-      backup: enabled
-
-  excludedNamespaces:
-    - kube-system
-    - velero
+# (commented out so `kubectl apply -f` accepts this file; it is Helm values,
+# not a Kubernetes resource)
+#
+# backup:
+#   enabled: true
+#   schedule: "0 3 * * *"  # Daily at 3 AM
+#   retention: "30d"
+#
+#   selectors:
+#     matchLabels:
+#       backup: enabled
+#
+#   excludedNamespaces:
+#     - kube-system
+#     - velero
 
 ---
 # Teams enable backup by labeling their resources:
